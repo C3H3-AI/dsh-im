@@ -1,8 +1,14 @@
 # dsh-im
 
+## 中文
+
 通过扫码把 IM 机器人接入 DeepSeek Harness。一个插件、一个设置入口，统一管理飞书和微信机器人。
 
 > GitHub 简介：通过扫码把IM机器人接入DeepSeek Harness（支持飞书、微信、钉钉等）。
+
+## 界面
+
+![IM机器人页面](docs/images/imbot.png)
 
 ## 当前内置渠道
 
@@ -35,3 +41,47 @@ node bin/dsh-im.mjs install --source .
 ```
 
 `npm run check` 运行单元测试、构建 Host/Client 产物，并验证发布包不包含凭据或独立飞书/微信设置页注册。
+
+---
+
+## English
+
+Connect IM bots to DeepSeek Harness by scanning a QR code. One plugin and one settings entry provide unified management for Feishu and WeChat bots.
+
+> GitHub description: Connect IM bots to DeepSeek Harness by scanning a QR code (supports Feishu, WeChat, DingTalk, and more).
+
+## Interface
+
+![IM bot settings page](docs/images/imbot.png)
+
+## Built-in channels
+
+- Feishu: create and bind a bot by scanning a QR code, then send and receive messages over a persistent connection.
+- WeChat: bind a WeChat bot by scanning a QR code, then send and receive messages through Tencent iLink long polling.
+
+Other IM platforms such as DingTalk can be added through the same channel-adapter structure. The current interface only exposes the implemented Feishu and WeChat channels.
+
+## Installation
+
+```sh
+npx -y github:xmanrui/dsh-im install
+```
+
+Restart `dsh web`, then open **Settings → Plugins → IM Bot**. The installer replaces directly installed `dsh-feishu` and `dsh-weixin` entries in the profile with `dsh-im` without deleting channel data. Existing Feishu credentials and WeChat QR bindings continue to work.
+
+## Design
+
+- Registers a single **IM Bot** settings page in Harness.
+- Uses Feishu and WeChat logos for channel navigation without enable/disable switches.
+- Keeps RPC endpoints, credentials, connection supervision, and session mappings isolated by channel.
+- Sends only QR codes and redacted status data to the browser, never App Secrets or `bot_token` values.
+
+## Local development
+
+```sh
+npm install
+npm run check
+node bin/dsh-im.mjs install --source .
+```
+
+`npm run check` runs unit tests, builds the Host and Client artifacts, and verifies that the published package contains neither credentials nor standalone Feishu or WeChat settings-page registrations.
