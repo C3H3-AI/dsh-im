@@ -28,13 +28,16 @@ const CSS = String.raw`
 .dim-logoWeixin svg { width: 19px; height: 19px; }
 .dim-logoFeishu { background: white; border: 1px solid var(--dsw-alias-line-border, #e5e6eb); }
 .dim-logoFeishu svg { width: 22px; height: 22px; }
+.dim-logoDingtalk { color: white; background: #1677ff; }
+.dim-logoDingtalk svg { width: 24px; height: 24px; }
 .dim-channelCopy { min-width: 0; display: block; }
 .dim-channelCopy strong { overflow: hidden; color: inherit; font-size: 14px; line-height: 20px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
 .dim-divider { width: 1px; min-height: 520px; background: var(--dsw-alias-line-divider, #eef0f3); }
 .dim-panel { min-width: 0; }
-.dim-panel .bxf-page, .dim-panel .dxw-page { width: 100%; max-width: none; padding: 0 0 24px; }
-.dim-panel .bxf-heading, .dim-panel .dxw-heading { justify-content: flex-end; }
-.dim-panel .bxf-headingTools, .dim-panel .dxw-tools { width: 100%; justify-content: flex-end; }
+.dim-panel .bxf-page, .dim-panel .dxw-page, .dim-panel .ddt-page { width: 100%; max-width: none; padding: 0 0 24px; }
+.dim-panel .bxf-heading, .dim-panel .dxw-heading, .dim-panel .ddt-heading { justify-content: flex-end; }
+.dim-panel .bxf-headingTools, .dim-panel .dxw-tools, .dim-panel .ddt-tools { width: 100%; justify-content: flex-end; }
+.dim-panel .ddt-headingCopy { display: none; }
 @media (max-width: 840px) {
   .dim-title { align-items: flex-start; }
   .dim-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; }

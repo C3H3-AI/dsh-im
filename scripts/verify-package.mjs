@@ -33,15 +33,18 @@ if ((client.match(/ctx\.slots\.inject\("settings\.plugins\.tab"/g) ?? []).length
 if (/role:\s*["']switch|type:\s*["']checkbox/.test(client)) {
   throw new Error('client bundle contains a channel enable switch');
 }
-if (!host.includes('@xmanrui/dsh-feishu') || !host.includes('@xmanrui/dsh-weixin')) {
-  throw new Error('host bundle does not compose both channel providers');
+if (!host.includes('@xmanrui/dsh-feishu')
+  || !host.includes('@xmanrui/dsh-weixin')
+  || !host.includes('@xmanrui/dsh-dingtalk')) {
+  throw new Error('host bundle does not compose all three channel providers');
 }
-if (!patch.includes("name: '@xmanrui/dsh-im'") || /dsh-(?:feishu|weixin)/.test(patch)) {
+if (!patch.includes("name: '@xmanrui/dsh-im'") || /dsh-(?:feishu|weixin|dingtalk)/.test(patch)) {
   throw new Error('bundle patch must activate only dsh-im');
 }
-for (const name of ['@xmanrui/dsh-feishu', '@xmanrui/dsh-weixin']) {
+for (const name of ['@xmanrui/dsh-feishu', '@xmanrui/dsh-weixin', '@xmanrui/dsh-dingtalk']) {
   const spec = manifest.dependencies?.[name];
-  if (typeof spec !== 'string' || !spec.startsWith('https://github.com/')) {
+  if (typeof spec !== 'string'
+    || !/^https:\/\/github\.com\/[^/]+\/[^/]+\/archive\/[0-9a-f]{40}\.tar\.gz$/.test(spec)) {
     throw new Error(`${name} must use a pinned public HTTPS archive`);
   }
 }

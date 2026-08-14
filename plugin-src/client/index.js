@@ -1,5 +1,7 @@
 import * as React from 'react';
 
+import { DINGTALK_RPC_CHANNEL } from '@xmanrui/dsh-dingtalk/client-api';
+import { DingtalkSettingsTab } from '@xmanrui/dsh-dingtalk/client-source';
 import { FeishuSettingsTab } from './channels/feishu/index.js';
 import { FEISHU_RPC_CHANNEL } from './channels/feishu/api.js';
 import { installFeishuStyles } from './channels/feishu/styles.js';
@@ -16,6 +18,7 @@ export const inject = ['slots', 'connection'];
 const CHANNELS = Object.freeze([
   { id: 'weixin', label: '微信' },
   { id: 'feishu', label: '飞书' },
+  { id: 'dingtalk', label: '钉钉' },
 ]);
 
 function WeixinLogo() {
@@ -37,17 +40,29 @@ function FeishuLogo() {
     ));
 }
 
-function ChannelLogo({ channel }) {
-  return channel === 'weixin' ? h(WeixinLogo) : h(FeishuLogo);
+function DingtalkLogo() {
+  return h('span', { className: 'dim-logo dim-logoDingtalk', 'aria-hidden': 'true' },
+    h('svg', { viewBox: '0 0 48 48', focusable: 'false' },
+      h('path', {
+        fill: 'currentColor',
+        d: 'M37.05 22.783c-6.758-5.216-14.378-12.128-22.73-19.538-.655-.585-1.242-.354-1.536.42-1.88 4.973-.058 9.386 2.889 11.932s7.368 4.912 10.058 6.155c.105.049.013.203-.093.163-4.953-2.182-8.397-3.765-13.07-7.368-.497-.388-1.01-.242-1.07.521-.384 4.748 2.657 8.483 6.058 9.745 2.1.781 4.398 1.212 6.53 1.474.109.015.084.178-.027.178-2.747.01-6.058-.654-8.935-1.751-.606-.233-.818.25-.722.633.491 2.008 2.974 5.076 6.926 5.73a12 12 0 0 0 2.228.115c.164 0 .208.089.154.217q-2.685 4.6-2.803 4.797c-.091.152-.036.275.156.275h3.543c.164 0 .264.106.18.246l-4.958 8.196c-.191.328.035.565.395.301s15.212-11.133 15.636-11.448c.195-.142.148-.327-.124-.327h-3.18c-.206 0-.252-.14-.111-.28.14-.141 3.602-3.594 4.837-4.888 1.283-1.35 1.938-3.825-.231-5.498',
+      }),
+    ));
 }
 
-export function IMSettingsTab({ feishuRpcCall, weixinRpcCall }) {
+function ChannelLogo({ channel }) {
+  if (channel === 'weixin') return h(WeixinLogo);
+  if (channel === 'feishu') return h(FeishuLogo);
+  return h(DingtalkLogo);
+}
+
+export function IMSettingsTab({ dingtalkRpcCall, feishuRpcCall, weixinRpcCall }) {
   const [selected, setSelected] = React.useState('weixin');
   const active = CHANNELS.find((channel) => channel.id === selected) ?? CHANNELS[0];
   return h('section', { className: 'dim-page', 'aria-label': 'IM机器人设置' },
     h('header', { className: 'dim-title' },
       h('p', null, '通过扫码把机器人接入 DeepSeek Harness'),
-      h('div', { className: 'dim-channelCount' }, '2 个渠道'),
+      h('div', { className: 'dim-channelCount' }, `${CHANNELS.length} 个渠道`),
     ),
     h('div', { className: 'dim-layout' },
       h('nav', { className: 'dim-rail', role: 'tablist', 'aria-label': 'IM 渠道' },
@@ -73,7 +88,9 @@ export function IMSettingsTab({ feishuRpcCall, weixinRpcCall }) {
         'aria-labelledby': `dim-tab-${active.id}`,
       }, active.id === 'weixin'
         ? h(WeixinSettingsTab, { rpcCall: weixinRpcCall })
-        : h(FeishuSettingsTab, { rpcCall: feishuRpcCall })),
+        : active.id === 'feishu'
+          ? h(FeishuSettingsTab, { rpcCall: feishuRpcCall })
+          : h(DingtalkSettingsTab, { rpcCall: dingtalkRpcCall })),
     ),
   );
 }
@@ -90,12 +107,14 @@ export function apply(ctx) {
     ctx.connection.rpc.call(FEISHU_RPC_CHANNEL, endpoint, payload, signal);
   const weixinRpcCall = (endpoint, payload, signal) =>
     ctx.connection.rpc.call(WEIXIN_RPC_CHANNEL, endpoint, payload, signal);
+  const dingtalkRpcCall = (endpoint, payload, signal) =>
+    ctx.connection.rpc.call(DINGTALK_RPC_CHANNEL, endpoint, payload, signal);
 
   ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
     name: 'settings.plugins.tab',
     id: 'im',
     order: 20,
     label: 'IM机器人',
-    inject: () => ({ feishuRpcCall, weixinRpcCall }),
+    inject: () => ({ dingtalkRpcCall, feishuRpcCall, weixinRpcCall }),
   }, IMSettingsTab));
 }

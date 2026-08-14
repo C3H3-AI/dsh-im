@@ -7,7 +7,11 @@ import { spawnSync } from 'node:child_process';
 
 const PACKAGE_NAME = '@xmanrui/dsh-im';
 const DEFAULT_SOURCE = 'github:xmanrui/dsh-im';
-const LEGACY_PACKAGES = ['@xmanrui/dsh-feishu', '@xmanrui/dsh-weixin'];
+const LEGACY_PACKAGES = [
+  '@xmanrui/dsh-feishu',
+  '@xmanrui/dsh-weixin',
+  '@xmanrui/dsh-dingtalk',
+];
 
 function usage() {
   console.log(`Usage:
@@ -80,7 +84,7 @@ try {
     }
     console.log('\nIM 机器人插件已安装。请重启 dsh web，然后打开「设置 → 插件 → IM机器人」。');
     if (legacy.size > 0) {
-      console.log('已用 dsh-im 替换独立飞书/微信插件；原有凭据和扫码绑定保持不变。');
+      console.log('已用 dsh-im 替换独立飞书/微信/钉钉插件；原有凭据和扫码绑定保持不变。');
     }
   } else if (command === 'uninstall') {
     if (args.length > 0) throw new Error(`无法识别的参数：${args.join(' ')}`);
