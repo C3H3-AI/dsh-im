@@ -47,11 +47,12 @@ const DINGTALK_CLIENT_SOURCE_URL = new URL(
   import.meta.url,
 );
 
-test('IM settings renders three compact logo channel tabs without enable switches', () => {
+test('IM settings renders four compact logo channel tabs without enable switches', () => {
   const markup = renderToStaticMarkup(React.createElement(IMSettingsTab, {
     feishuRpcCall: async () => ({ ok: true, value: {} }),
     weixinRpcCall: async () => ({ ok: true, value: {} }),
     dingtalkRpcCall: async () => ({ ok: true, value: {} }),
+    qqRpcCall: async () => ({ ok: true, value: {} }),
   }));
 
   assert.match(markup, /IM机器人/);
@@ -60,10 +61,12 @@ test('IM settings renders three compact logo channel tabs without enable switche
   assert.match(markup, />微信</);
   assert.match(markup, />飞书</);
   assert.match(markup, />钉钉</);
+  assert.match(markup, />QQ</);
   assert.match(markup, /dim-logoWeixin/);
   assert.match(markup, /dim-logoFeishu/);
   assert.match(markup, /dim-logoDingtalk/);
-  assert.equal((markup.match(/role="tab"/g) ?? []).length, 3);
+  assert.match(markup, /dim-logoQq/);
+  assert.equal((markup.match(/role="tab"/g) ?? []).length, 4);
   assert.equal((markup.match(/aria-selected="true"/g) ?? []).length, 1);
   assert.doesNotMatch(markup, /role="switch"|type="checkbox"/);
   assert.doesNotMatch(markup, /dim-chevron|扫码绑定<\/small>|扫码接入<\/small>/);

@@ -13,9 +13,11 @@ const required = [
   'plugin-src/host/channels/feishu/index.mjs',
   'plugin-src/host/channels/weixin/index.mjs',
   'plugin-src/host/channels/dingtalk/index.mjs',
+  'plugin-src/host/channels/qq/index.mjs',
   'src/channels/feishu/feishu-runtime.mjs',
   'src/channels/weixin/weixin-runtime.mjs',
   'src/channels/dingtalk/dingtalk-runtime.mjs',
+  'src/channels/qq/qq-runtime.mjs',
 ];
 await Promise.all(required.map((path) => access(resolve(root, path))));
 
@@ -47,7 +49,7 @@ if (!client.includes('container-type: inline-size')
   || !client.includes('@container (max-width: 680px)')) {
   throw new Error('client bundle does not contain the narrow-panel DingTalk QR layout');
 }
-for (const marker of ['/feishu', '/weixin', '/dingtalk']) {
+for (const marker of ['/feishu', '/weixin', '/dingtalk', '/qq']) {
   if (!host.includes(marker)) {
     throw new Error(`host bundle does not contain the internal ${marker} RPC provider`);
   }
@@ -71,6 +73,8 @@ for (const name of ['@xmanrui/dsh-feishu', '@xmanrui/dsh-weixin', '@xmanrui/dsh-
 const directDependencies = {
   '@larksuiteoapi/node-sdk': '1.73.0',
   'dingtalk-stream': '2.1.4',
+  '@tencent-connect/qqbot-connector': '1.2.0',
+  '@tencent-connect/qqbot-nodejs': '1.0.4',
   qrcode: '1.5.4',
 };
 for (const [name, version] of Object.entries(directDependencies)) {
