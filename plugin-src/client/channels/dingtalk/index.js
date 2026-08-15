@@ -53,44 +53,37 @@ function Heading({ totals, adding, busy, onAdd, addButtonRef }) {
       h('h2', null, '钉钉机器人'),
       h('p', null, '通过扫码把钉钉机器人接入 DeepSeek Harness')),
     h('div', { className: 'ddt-tools' },
-      totals.configured > 0
-        ? h('div', { className: 'ddt-badge' },
-            h('span', {
-              className: 'ddt-dot',
-              'data-tone': totals.connected > 0 ? 'success' : 'warning',
-            }),
-            h('span', null, `${totals.connected} / ${totals.configured} 在线`))
-        : null,
-      h('div', {
-        className: 'ddt-badge',
-        title: '应用密钥只写入 Harness Host 凭据服务，不会发送到浏览器',
-      }, '凭据仅保存在本机'),
       h(Button, {
         kind: 'primary',
+        className: 'dim-scanButton',
         onClick: onAdd,
         disabled: adding || busy,
         ref: addButtonRef,
-      }, adding ? '正在接入' : '扫码接入钉钉')));
+      }, adding ? '正在接入' : '扫码接入钉钉'),
+      totals.configured > 0
+        ? h('div', { className: 'ddt-badge dim-onlineBadge' },
+            h('span', null, `${totals.connected} / ${totals.configured} 在线`))
+        : null));
 }
 
 function LoadingView() {
-  return h('div', { className: 'ddt-card ddt-loading', 'aria-busy': 'true' },
-    h('div', { className: 'ddt-spinner' }),
+  return h('div', { className: 'ddt-card ddt-loading dim-surfaceCard dim-loadingView', 'aria-busy': 'true' },
+    h('div', { className: 'ddt-spinner dim-spinner' }),
     h('span', null, '正在读取钉钉连接状态…'));
 }
 
 function EmptyView({ busy, onStart }) {
-  return h('div', { className: 'ddt-card' },
-    h('div', { className: 'ddt-cardBody ddt-empty' },
-      h('div', null,
-        h('div', { className: 'ddt-stateLabel' },
-          h('span', { className: 'ddt-dot' }), h('span', null, '尚未接入钉钉机器人')),
+  return h('div', { className: 'ddt-card dim-surfaceCard' },
+    h('div', { className: 'ddt-cardBody ddt-empty dim-surfaceBody dim-emptyView' },
+      h('div', { className: 'dim-emptyCopy' },
+        h('div', { className: 'ddt-stateLabel dim-stateLabel' },
+          h('span', { className: 'ddt-dot dim-stateDot' }), h('span', null, '尚未接入钉钉机器人')),
         h('h3', null, '扫一次码，自动创建并连接机器人'),
         h('p', null, '授权由钉钉官方页面完成。扫码账号必须已加入一个企业/组织并有权创建机器人；创建成功后，应用凭据会直接写入 Harness Host。'),
-        h('div', { className: 'ddt-actions' },
+        h('div', { className: 'ddt-actions dim-viewActions' },
           h(Button, { kind: 'primary', onClick: onStart, disabled: busy },
             busy ? '正在生成二维码…' : '生成钉钉二维码'))),
-      h('div', { className: 'ddt-brandMark', 'aria-hidden': 'true' },
+      h('div', { className: 'ddt-brandMark dim-emptyBrand', 'aria-hidden': 'true' },
         h(DingtalkIcon, { size: 68 }))));
 }
 
@@ -104,34 +97,34 @@ function QrPanel({ provision, now, busy, onRefresh, onCancel }) {
 
   React.useEffect(() => setImageFailed(false), [source]);
 
-  return h('div', { className: 'ddt-card' },
-    h('div', { className: 'ddt-cardBody ddt-qrLayout' },
-      h('div', { className: 'ddt-qrColumn' },
-        h('div', { className: 'ddt-qrFrame' },
+  return h('div', { className: 'ddt-card dim-surfaceCard' },
+    h('div', { className: 'ddt-cardBody ddt-qrLayout dim-surfaceBody dim-qrLayout' },
+      h('div', { className: 'ddt-qrColumn dim-qrColumn' },
+        h('div', { className: 'ddt-qrFrame dim-qrFrame' },
           source && !imageFailed
             ? h('img', {
                 src: source,
                 alt: '用于把钉钉机器人接入 DeepSeek Harness 的一次性二维码',
                 onError: () => setImageFailed(true),
               })
-            : h('div', { className: 'ddt-qrFallback' }, '二维码图片未就绪，请重新生成。'),
-          expired ? h('div', { className: 'ddt-expired' }, '二维码已过期\n请重新生成') : null),
-        h('div', { className: 'ddt-countdown' },
-          h('div', { className: 'ddt-countdownTop' },
+            : h('div', { className: 'ddt-qrFallback dim-qrFallback' }, '二维码图片未就绪，请重新生成。'),
+          expired ? h('div', { className: 'ddt-expired dim-qrExpired' }, '二维码已过期\n请重新生成') : null),
+        h('div', { className: 'ddt-countdown dim-countdown' },
+          h('div', { className: 'ddt-countdownTop dim-countdownTop' },
             h('span', null, '二维码有效时间'), h('strong', null, formatRemaining(remaining))),
-          h('div', { className: 'ddt-progress', 'aria-hidden': 'true' },
+          h('div', { className: 'ddt-progress dim-progress', 'aria-hidden': 'true' },
             h('span', { style: { '--ddt-progress': `${progress}%` } })))),
-      h('div', { className: 'ddt-qrCopy' },
-        h('div', { className: 'ddt-stateLabel' },
-          h('span', { className: 'ddt-dot', 'data-tone': expired ? 'error' : 'warning' }),
+      h('div', { className: 'ddt-qrCopy dim-qrCopy' },
+        h('div', { className: 'ddt-stateLabel dim-stateLabel' },
+          h('span', { className: 'ddt-dot dim-stateDot', 'data-tone': expired ? 'error' : 'warning' }),
           h('span', null, expired ? '二维码已失效' : '等待钉钉扫码授权')),
         h('h3', null, expired ? '重新生成二维码后继续' : '使用钉钉 App 完成机器人授权'),
         h('p', null, '扫码账号必须已加入企业/组织。如果钉钉提示尚未加入组织，请在提示页创建组织，或换用已加入组织的账号。'),
-        h('ol', { className: 'ddt-steps' },
+        h('ol', { className: 'ddt-steps dim-steps' },
           h('li', null, '使用已加入企业/组织的钉钉账号扫描左侧二维码'),
           h('li', null, '在授权页点击“一键创建新机器人”'),
           h('li', null, '保持本页打开，等待机器人自动连接')),
-        h('div', { className: 'ddt-actions' },
+        h('div', { className: 'ddt-actions dim-viewActions' },
           expired
             ? h(Button, { kind: 'primary', onClick: onRefresh, disabled: busy }, '重新生成二维码')
             : null,
@@ -142,15 +135,15 @@ function QrPanel({ provision, now, busy, onRefresh, onCancel }) {
 function ProgressPanel({ status, busy, onCancel }) {
   const connecting = status === 'connecting';
   const creating = status === 'creating';
-  return h('div', { className: 'ddt-card ddt-loading', 'aria-busy': 'true' },
-    h('div', { className: 'ddt-spinner' }),
+  return h('div', { className: 'ddt-card ddt-loading dim-surfaceCard dim-loadingView', 'aria-busy': 'true' },
+    h('div', { className: 'ddt-spinner dim-spinner' }),
     h('h3', null, connecting
       ? '机器人已创建，正在建立消息连接'
       : creating ? '授权已确认，正在创建钉钉机器人' : '正在确认钉钉授权'),
     h('p', null, connecting
       ? '正在检查钉钉 Stream 长连接，成功后会自动显示为在线。'
       : '请勿关闭本页，钉钉完成授权后将自动继续。'),
-    h('div', { className: 'ddt-actions', style: { justifyContent: 'center', marginTop: 14 } },
+    h('div', { className: 'ddt-actions dim-viewActions', style: { justifyContent: 'center', marginTop: 14 } },
       h(Button, { onClick: onCancel, disabled: busy }, '取消接入')));
 }
 
@@ -159,12 +152,12 @@ function ProvisionError({ provision, busy, onRetry, onClose }) {
     code: 'DINGTALK_PROVISION_FAILED',
     message: '钉钉机器人没有接入完成',
   };
-  return h('div', { className: 'ddt-card' },
-    h('div', { className: 'ddt-inlineError', role: 'alert' },
+  return h('div', { className: 'ddt-card dim-surfaceCard' },
+    h('div', { className: 'ddt-inlineError dim-inlineError', role: 'alert' },
       h('h3', null, provision.status === 'expired' ? '二维码已过期' : '钉钉机器人没有接入完成'),
       h('p', null, error.message),
       h('span', { className: 'ddt-errorCode' }, error.code),
-      h('div', { className: 'ddt-actions' },
+      h('div', { className: 'ddt-actions dim-viewActions' },
         h(Button, { kind: 'primary', onClick: onRetry, disabled: busy }, '重新生成二维码'),
         h(Button, { onClick: onClose, disabled: busy }, '关闭'))));
 }
@@ -184,7 +177,7 @@ function RemoveConfirmation({ account, busy, onConfirm, onCancel }) {
   const cancelRef = React.useRef(null);
   React.useEffect(() => cancelRef.current?.focus(), []);
   return h('div', {
-    className: 'ddt-confirm',
+    className: 'ddt-confirm dim-confirm',
     role: 'alertdialog',
     'aria-label': `移除${account.bot.name}`,
     onKeyDown: (event) => {
@@ -193,7 +186,7 @@ function RemoveConfirmation({ account, busy, onConfirm, onCancel }) {
   },
   h('strong', null, `从 DeepSeek Harness 移除“${account.bot.name}”？`),
   h('p', null, '这会停止消息连接，并删除本机保存的应用凭据、机器人配置及会话映射。钉钉开放平台中的机器人不会被自动删除。'),
-  h('div', { className: 'ddt-actions' },
+  h('div', { className: 'ddt-actions dim-viewActions' },
     h(Button, { ref: cancelRef, onClick: onCancel, disabled: busy }, '保留机器人'),
     h(Button, { kind: 'danger', onClick: onConfirm, disabled: busy },
       busy ? '正在移除…' : '确认移除接入')));
@@ -211,27 +204,27 @@ export function AccountCard({
   const state = busy === 'reconnect' ? 'connecting' : account.state;
   const tone = account.connected ? 'success' : state === 'error' ? 'error' : 'warning';
   const stateLabel = account.connected ? '运行正常' : state === 'connecting' ? '正在连接' : '连接未就绪';
-  return h('article', { className: 'ddt-card', tabIndex: -1, 'data-bot-id': account.botId },
-    h('div', { className: 'ddt-cardBody' },
-      h('div', { className: 'ddt-accountTop' },
-        h('div', { className: 'ddt-accountIdentity' },
-          h('div', { className: 'ddt-avatar', 'aria-hidden': 'true' }, h(DingtalkIcon, { size: 29 })),
-          h('div', null,
+  return h('article', { className: 'ddt-card dim-botCard', tabIndex: -1, 'data-bot-id': account.botId },
+    h('div', { className: 'ddt-cardBody dim-botCardBody' },
+      h('div', { className: 'ddt-accountTop dim-botCardTop' },
+        h('div', { className: 'ddt-accountIdentity dim-botIdentity' },
+          h('div', { className: 'ddt-avatar dim-botAvatar', 'aria-hidden': 'true' }, h(DingtalkIcon, { size: 29 })),
+          h('div', { className: 'dim-botName' },
             h('h3', { title: account.bot.name }, account.bot.name),
             h('p', { title: account.bot.clientIdMasked }, account.bot.clientIdMasked))),
-        h('div', { className: 'ddt-health' },
-          h('span', { className: 'ddt-dot', 'data-tone': tone }), h('span', null, stateLabel))),
-      h('dl', { className: 'ddt-metrics' },
-        h('div', { className: 'ddt-metric' }, h('dt', null, '消息通道'),
+        h('div', { className: 'ddt-health dim-botHealth' },
+          h('span', { className: 'ddt-dot dim-healthDot', 'data-tone': tone }), h('span', null, stateLabel))),
+      h('dl', { className: 'ddt-metrics dim-botMetrics' },
+        h('div', { className: 'ddt-metric dim-botMetric' }, h('dt', null, '消息通道'),
           h('dd', null, account.connected ? 'Stream 长连接' : '离线')),
-        h('div', { className: 'ddt-metric' }, h('dt', null, '最近检查'),
+        h('div', { className: 'ddt-metric dim-botMetric' }, h('dt', null, '最近检查'),
           h('dd', null, checkedTime(account.health.lastCheckedAt)))),
-      h('div', { className: 'ddt-accountFooter' },
-        h('div', { className: 'ddt-summary' }, account.error?.message ?? account.health.summary),
-        h('div', { className: 'ddt-actions' },
-          h(Button, { onClick: onReconnect, disabled: Boolean(busy) },
+      h('div', { className: 'ddt-accountFooter dim-cardFooter' },
+        h('div', { className: 'ddt-summary dim-cardSummary' }, account.error?.message ?? account.health.summary),
+        h('div', { className: 'ddt-actions dim-cardActions' },
+          h(Button, { className: 'dim-cardAction', onClick: onReconnect, disabled: Boolean(busy) },
             busy === 'reconnect' ? '检查中…' : account.connected ? '检查连接' : '重试连接'),
-          h(Button, { kind: 'danger', onClick: onRequestRemove, disabled: Boolean(busy) },
+          h(Button, { className: 'dim-cardAction', kind: 'danger', onClick: onRequestRemove, disabled: Boolean(busy) },
             '移除接入')))),
     removing ? h(RemoveConfirmation, {
       account,
@@ -242,10 +235,10 @@ export function AccountCard({
 }
 
 function AccountList(props) {
-  return h('section', null,
-    h('div', { className: 'ddt-listHeading' },
+  return h('section', { className: 'dim-listSection' },
+    h('div', { className: 'ddt-listHeading dim-listHeading' },
       h('h3', null, '已接入的钉钉机器人'), h('span', null, `${props.bots.length} 个`)),
-    h('ul', { className: 'ddt-list' }, props.bots.map((account) => h('li', { key: account.botId },
+    h('ul', { className: 'ddt-list dim-botList' }, props.bots.map((account) => h('li', { key: account.botId },
       h(AccountCard, {
         account,
         busy: props.busyByBot[account.botId],
@@ -605,7 +598,7 @@ export function DingtalkSettingsTab({ rpcCall }) {
     });
   }
 
-  return h('section', { className: 'ddt-page', 'aria-label': '钉钉设置' },
+  return h('section', { className: 'ddt-page dim-channelPage', 'aria-label': '钉钉设置' },
     h(Heading, {
       totals: model.totals,
       adding: Boolean(provision),
@@ -615,13 +608,13 @@ export function DingtalkSettingsTab({ rpcCall }) {
     }),
     h('div', { className: 'ddt-visuallyHidden', role: 'status', 'aria-live': 'polite' }, notice),
     model.error && model.phase === 'ready'
-      ? h('div', { className: 'ddt-statusNotice', role: 'alert' }, `状态刷新失败：${model.error.message}`)
+      ? h('div', { className: 'ddt-statusNotice dim-statusNotice', role: 'alert' }, `状态刷新失败：${model.error.message}`)
       : null,
     model.phase === 'loading'
       ? h(LoadingView)
       : model.phase === 'error'
-        ? h('div', { className: 'ddt-card' },
-            h('div', { className: 'ddt-inlineError', role: 'alert' },
+        ? h('div', { className: 'ddt-card dim-surfaceCard' },
+            h('div', { className: 'ddt-inlineError dim-inlineError', role: 'alert' },
               h('h3', null, '无法读取钉钉机器人状态'),
               h('p', null, model.error?.message ?? '请稍后重试'),
               h(Button, { onClick: () => void loadStatus() }, '重新读取')))

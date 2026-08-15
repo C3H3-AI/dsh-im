@@ -60,7 +60,7 @@ const CSS = String.raw`
   flex: none;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   flex-wrap: nowrap;
   gap: 8px;
 }
@@ -80,22 +80,6 @@ const CSS = String.raw`
 }
 
 .bxf-totalBadge strong { color: var(--bxf-success); font-size: 13px; }
-
-.bxf-localBadge {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  border: 1px solid var(--dsw-alias-border-l2, #dee0e3);
-  border-radius: 999px;
-  padding: 4px 10px;
-  color: var(--dsw-alias-label-secondary, #646a73);
-  background: var(--dsw-alias-bg-layer-1, #fff);
-  font-size: 11px;
-  line-height: 16px;
-  white-space: nowrap;
-}
 
 .bxf-card {
   position: relative;
@@ -424,12 +408,11 @@ const CSS = String.raw`
 .bxf-metric dt { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; line-height: 17px; }
 .bxf-metric dd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary, #1f2329); font-size: 12px; line-height: 18px; font-weight: 550; margin: 3px 0 0; }
 
-.bxf-divider { height: 1px; background: var(--dsw-alias-border-l2, #dee0e3); margin: 22px 0 0; }
-.bxf-connectedFooter { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 17px; }
+.bxf-connectedFooter { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--dsw-alias-line-divider, #eef0f3); }
 .bxf-healthSummary { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; }
-.bxf-healthSummary strong { color: var(--dsw-alias-label-primary, #1f2329); font-weight: 600; }
 .bxf-healthSummary[data-error="true"] { color: var(--bxf-error); }
-.bxf-botActions { margin-top: 0; justify-content: flex-end; }
+.bxf-botActions { flex: none; flex-wrap: nowrap; gap: 8px; margin-top: 0; justify-content: flex-end; }
+.bxf-botActions .bxf-button { flex: none; white-space: nowrap; }
 
 .bxf-confirm {
   border-top: 1px solid var(--dsw-alias-border-l2, #dee0e3);
@@ -478,8 +461,7 @@ const CSS = String.raw`
 
 @container (max-width: 620px) {
   .bxf-headingTools { gap: 6px; }
-  .bxf-headingTools .bxf-totalBadge, .bxf-headingTools .bxf-localBadge { padding-inline: 8px; }
-  .bxf-headingTools .bxf-localBadge { gap: 4px; }
+  .bxf-headingTools .bxf-totalBadge { padding-inline: 8px; }
   .bxf-headingTools .bxf-bindButton { padding-inline: 10px; }
 }
 
@@ -489,9 +471,7 @@ const CSS = String.raw`
   .bxf-qrLayout { grid-template-columns: minmax(0, 1fr); justify-items: center; }
   .bxf-qrCopy { width: 100%; }
   .bxf-statusGrid { grid-template-columns: minmax(0, 1fr); }
-  .bxf-connectedTop, .bxf-connectedFooter { align-items: flex-start; flex-direction: column; }
-  .bxf-botActions { width: 100%; justify-content: flex-start; }
-  .bxf-botActions .bxf-button { min-height: 44px; }
+  .bxf-connectedTop { align-items: flex-start; flex-direction: column; }
   .bxf-inlineError { grid-template-columns: minmax(0, 1fr); padding: 20px; }
   .bxf-statusNotice { align-items: flex-start; flex-wrap: wrap; }
   .bxf-cardBody { padding: 20px; }

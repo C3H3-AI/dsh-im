@@ -23,7 +23,7 @@ const CSS = String.raw`
 .dxw-heading h2 { font-size: 20px; line-height: 28px; font-weight: 680; }
 .dxw-heading p { color: var(--dsw-alias-label-secondary, #646a73); font-size: 13px; line-height: 20px; margin-top: 5px; white-space: nowrap; }
 .dxw-tools, .dxw-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
-.dxw-tools { justify-content: flex-end; }
+.dxw-tools { width: 100%; justify-content: space-between; flex-wrap: nowrap; }
 .dxw-badge { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 0 11px; border-radius: 999px; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-fill-secondary, #f2f3f5); font-size: 12px; white-space: nowrap; }
 .dxw-dot { width: 8px; height: 8px; border-radius: 50%; background: #aeb3bb; flex: none; }
 .dxw-dot[data-tone="success"] { background: var(--dxw-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dxw-success) 14%, transparent); }
@@ -83,6 +83,8 @@ const CSS = String.raw`
 .dxw-metric dt { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; }
 .dxw-metric dd { overflow: hidden; margin: 5px 0 0; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .dxw-accountFooter { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding-top: 16px; border-top: 1px solid var(--dsw-alias-line-divider, #eef0f3); }
+.dxw-accountFooter .dxw-actions { flex: none; flex-wrap: nowrap; gap: 8px; margin-top: 0; }
+.dxw-accountFooter .dxw-button { flex: none; white-space: nowrap; }
 .dxw-summary { color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; }
 .dxw-confirm { padding: 18px 24px; border-top: 1px solid color-mix(in srgb, var(--dxw-error) 25%, transparent); background: color-mix(in srgb, var(--dxw-error) 5%, transparent); }
 .dxw-confirm strong { display: block; font-size: 14px; margin-bottom: 6px; }
@@ -93,8 +95,7 @@ const CSS = String.raw`
 .dxw-visuallyHidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @keyframes dxw-spin { to { transform: rotate(360deg); } }
 @media (max-width: 720px) {
-  .dxw-heading, .dxw-accountTop, .dxw-accountFooter { flex-direction: column; align-items: stretch; }
-  .dxw-tools { justify-content: flex-start; }
+  .dxw-heading, .dxw-accountTop { flex-direction: column; align-items: stretch; }
   .dxw-empty { grid-template-columns: minmax(0, 1fr); }
   .dxw-logo { display: none; }
   .dxw-qrLayout { grid-template-columns: minmax(0, 1fr); justify-items: center; }

@@ -26,7 +26,7 @@ const CSS = String.raw`
 .ddt-heading h2 { font-size: 20px; line-height: 28px; font-weight: 680; }
 .ddt-heading p { margin-top: 5px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 13px; line-height: 20px; white-space: nowrap; }
 .ddt-tools, .ddt-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
-.ddt-tools { justify-content: flex-end; }
+.ddt-tools { width: 100%; justify-content: space-between; flex-wrap: nowrap; }
 .ddt-badge { min-height: 30px; display: inline-flex; align-items: center; gap: 7px; padding: 0 11px; border-radius: 999px; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-fill-secondary, #f2f3f5); font-size: 12px; white-space: nowrap; }
 .ddt-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: #aeb3bb; }
 .ddt-dot[data-tone="success"] { background: var(--ddt-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ddt-success) 14%, transparent); }
@@ -92,6 +92,8 @@ const CSS = String.raw`
 .ddt-metric dt { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; }
 .ddt-metric dd { overflow: hidden; margin: 5px 0 0; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .ddt-accountFooter { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding-top: 16px; border-top: 1px solid var(--dsw-alias-line-divider, #eef0f3); }
+.ddt-accountFooter .ddt-actions { flex: none; flex-wrap: nowrap; gap: 8px; margin-top: 0; }
+.ddt-accountFooter .ddt-button { flex: none; white-space: nowrap; }
 .ddt-summary { color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; }
 .ddt-confirm { padding: 18px 24px; border-top: 1px solid color-mix(in srgb, var(--ddt-error) 25%, transparent); background: color-mix(in srgb, var(--ddt-error) 5%, transparent); }
 .ddt-confirm strong { display: block; margin-bottom: 6px; font-size: 14px; }
@@ -113,9 +115,8 @@ const CSS = String.raw`
   .ddt-metric { padding: 10px; }
 }
 @media (max-width: 720px) {
-  .ddt-heading, .ddt-accountTop, .ddt-accountFooter { flex-direction: column; align-items: stretch; }
+  .ddt-heading, .ddt-accountTop { flex-direction: column; align-items: stretch; }
   .ddt-heading p { white-space: normal; }
-  .ddt-tools { justify-content: flex-start; }
   .ddt-empty { grid-template-columns: minmax(0, 1fr); }
   .ddt-brandMark { display: none; }
   .ddt-qrLayout { grid-template-columns: minmax(0, 1fr); justify-items: center; }

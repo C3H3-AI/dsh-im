@@ -36,42 +36,40 @@ const Button = React.forwardRef(function Button(
 function Heading({ totals, adding, busy, onAdd, addButtonRef }) {
   return h('div', { className: 'dxw-heading' },
     h('div', { className: 'dxw-tools' },
-      totals.configured > 0
-        ? h('div', { className: 'dxw-badge' },
-            h('span', { className: 'dxw-dot', 'data-tone': totals.connected > 0 ? 'success' : 'warning' }),
-            h('span', null, `${totals.connected} / ${totals.configured} 在线`))
-        : null,
-      h('div', { className: 'dxw-badge', title: 'bot_token 仅保存在 Harness Host 凭据服务中' },
-        h('span', null, '凭据仅保存在本机')),
       h(Button, {
         kind: 'primary',
+        className: 'dim-scanButton',
         onClick: onAdd,
         disabled: adding || busy,
         ref: addButtonRef,
       }, adding ? '正在绑定' : '扫码绑定微信'),
+      totals.configured > 0
+        ? h('div', { className: 'dxw-badge dim-onlineBadge' },
+            h('span', null, `${totals.connected} / ${totals.configured} 在线`))
+        : null,
     ),
   );
 }
 
 function LoadingView() {
-  return h('div', { className: 'dxw-card dxw-loading', 'aria-busy': 'true' },
-    h('div', { className: 'dxw-spinner' }),
+  return h('div', { className: 'dxw-card dxw-loading dim-surfaceCard dim-loadingView', 'aria-busy': 'true' },
+    h('div', { className: 'dxw-spinner dim-spinner' }),
     h('span', null, '正在读取微信连接状态…'));
 }
 
 function EmptyView({ onStart, busy }) {
-  return h('div', { className: 'dxw-card' },
-    h('div', { className: 'dxw-cardBody dxw-empty' },
-      h('div', null,
-        h('div', { className: 'dxw-stateLabel' },
-          h('span', { className: 'dxw-dot' }), h('span', null, '尚未绑定微信')),
+  return h('div', { className: 'dxw-card dim-surfaceCard' },
+    h('div', { className: 'dxw-cardBody dxw-empty dim-surfaceBody dim-emptyView' },
+      h('div', { className: 'dim-emptyCopy' },
+        h('div', { className: 'dxw-stateLabel dim-stateLabel' },
+          h('span', { className: 'dxw-dot dim-stateDot' }), h('span', null, '尚未绑定微信')),
         h('h3', null, '扫一次码，就能在微信里使用 Harness'),
         h('p', null, '二维码由腾讯微信 iLink 服务签发。用手机微信扫描并确认后，账号凭据会直接写入 Harness Host，浏览器不会收到 bot_token。'),
-        h('div', { className: 'dxw-actions' },
+        h('div', { className: 'dxw-actions dim-viewActions' },
           h(Button, { kind: 'primary', onClick: onStart, disabled: busy },
             busy ? '正在生成二维码…' : '生成微信二维码')),
       ),
-      h('div', { className: 'dxw-logo', 'aria-hidden': 'true' }, h(WeixinLogoGlyph, { size: 64 })),
+      h('div', { className: 'dxw-logo dim-emptyBrand', 'aria-hidden': 'true' }, h(WeixinLogoGlyph, { size: 64 })),
     ));
 }
 
@@ -85,35 +83,35 @@ function QrPanel({ provision, now, busy, onRefresh, onCancel }) {
   const progress = Math.round(Math.min(1, remaining / duration) * 100);
   React.useEffect(() => setImageFailed(false), [source]);
 
-  return h('div', { className: 'dxw-card' },
-    h('div', { className: 'dxw-cardBody dxw-qrLayout' },
-      h('div', { className: 'dxw-qrColumn' },
-        h('div', { className: 'dxw-qrFrame' },
+  return h('div', { className: 'dxw-card dim-surfaceCard' },
+    h('div', { className: 'dxw-cardBody dxw-qrLayout dim-surfaceBody dim-qrLayout' },
+      h('div', { className: 'dxw-qrColumn dim-qrColumn' },
+        h('div', { className: 'dxw-qrFrame dim-qrFrame' },
           source && !imageFailed
             ? h('img', {
                 src: source,
                 alt: '用于把微信机器人绑定到 DeepSeek Harness 的一次性二维码',
                 onError: () => setImageFailed(true),
               })
-            : h('div', { className: 'dxw-qrFallback' }, '二维码图片未就绪，请使用备用链接。'),
-          expired ? h('div', { className: 'dxw-expired' }, '二维码已过期\n请重新生成') : null,
+            : h('div', { className: 'dxw-qrFallback dim-qrFallback' }, '二维码图片未就绪，请使用备用链接。'),
+          expired ? h('div', { className: 'dxw-expired dim-qrExpired' }, '二维码已过期\n请重新生成') : null,
         ),
-        h('div', { className: 'dxw-countdown' },
-          h('div', null, h('span', null, '二维码有效时间'), h('strong', null, formatRemaining(remaining))),
-          h('div', { className: 'dxw-progress', 'aria-hidden': 'true' },
+        h('div', { className: 'dxw-countdown dim-countdown' },
+          h('div', { className: 'dim-countdownTop' }, h('span', null, '二维码有效时间'), h('strong', null, formatRemaining(remaining))),
+          h('div', { className: 'dxw-progress dim-progress', 'aria-hidden': 'true' },
             h('span', { style: { '--dxw-progress': `${progress}%` } })),
         )),
-      h('div', { className: 'dxw-qrCopy' },
-        h('div', { className: 'dxw-stateLabel' },
-          h('span', { className: 'dxw-dot', 'data-tone': provision.status === 'scanned' ? 'success' : 'warning' }),
+      h('div', { className: 'dxw-qrCopy dim-qrCopy' },
+        h('div', { className: 'dxw-stateLabel dim-stateLabel' },
+          h('span', { className: 'dxw-dot dim-stateDot', 'data-tone': provision.status === 'scanned' ? 'success' : 'warning' }),
           h('span', null, provision.status === 'scanned' ? '已扫码，请在手机上确认' : '等待微信扫码')),
         h('h3', null, expired ? '二维码已失效' : '使用手机微信扫描二维码'),
         h('p', null, '请在手机上核对并确认授权。部分账号会额外显示一个配对数字，页面会在需要时提示输入。'),
-        h('ol', { className: 'dxw-steps' },
+        h('ol', { className: 'dxw-steps dim-steps' },
           h('li', null, '打开手机微信并扫描左侧二维码'),
           h('li', null, '在微信中确认连接该机器人'),
           h('li', null, '保持本页打开，等待消息长轮询变为在线')),
-        h('div', { className: 'dxw-actions' },
+        h('div', { className: 'dxw-actions dim-viewActions' },
           expired
             ? h(Button, { kind: 'primary', onClick: onRefresh, disabled: busy }, '重新生成二维码')
             : null,
@@ -130,9 +128,9 @@ function VerificationPanel({ provision, busy, onSubmit, onCancel }) {
   const [code, setCode] = React.useState('');
   const valid = /^\d{4,8}$/.test(code);
   React.useEffect(() => setCode(''), [provision.attemptId]);
-  return h('div', { className: 'dxw-card' },
+  return h('div', { className: 'dxw-card dim-surfaceCard' },
     h('form', {
-      className: 'dxw-verify',
+      className: 'dxw-verify dim-specialView',
       onSubmit: (event) => {
         event.preventDefault();
         if (valid && !busy) onSubmit(code);
@@ -163,22 +161,22 @@ function VerificationPanel({ provision, busy, onSubmit, onCancel }) {
 }
 
 function ProgressPanel({ scanned, onCancel, busy }) {
-  return h('div', { className: 'dxw-card dxw-loading', 'aria-busy': 'true' },
-    h('div', { className: 'dxw-spinner' }),
+  return h('div', { className: 'dxw-card dxw-loading dim-surfaceCard dim-loadingView', 'aria-busy': 'true' },
+    h('div', { className: 'dxw-spinner dim-spinner' }),
     h('h3', null, scanned ? '微信已确认，正在启动消息连接' : '正在准备微信二维码'),
     h('p', null, scanned ? '正在保存凭据并验证 Harness 与微信长轮询。' : '正在联系腾讯微信 iLink 服务。'),
-    onCancel ? h('div', { className: 'dxw-actions', style: { justifyContent: 'center', marginTop: 14 } },
+    onCancel ? h('div', { className: 'dxw-actions dim-viewActions', style: { justifyContent: 'center', marginTop: 14 } },
       h(Button, { onClick: onCancel, disabled: busy }, '取消')) : null);
 }
 
 function ProvisionError({ provision, busy, onRetry, onClose }) {
   const error = provision.error ?? { code: 'WEIXIN_PROVISION_FAILED', message: '微信绑定没有完成' };
-  return h('div', { className: 'dxw-card' },
-    h('div', { className: 'dxw-error', role: 'alert' },
+  return h('div', { className: 'dxw-card dim-surfaceCard' },
+    h('div', { className: 'dxw-error dim-inlineError', role: 'alert' },
       h('h3', null, provision.status === 'expired' ? '二维码已过期' : '微信没有绑定完成'),
       h('p', null, error.message),
       h('span', { className: 'dxw-errorCode' }, error.code),
-      h('div', { className: 'dxw-actions' },
+      h('div', { className: 'dxw-actions dim-viewActions' },
         h(Button, { kind: 'primary', onClick: onRetry, disabled: busy }, '重新生成二维码'),
         h(Button, { onClick: onClose, disabled: busy }, '关闭'))));
 }
@@ -197,30 +195,30 @@ function checkedTime(timestamp) {
 export function AccountCard({ account, busy, removing, onReconnect, onRequestRemove, onConfirmRemove, onCancelRemove }) {
   const state = busy === 'reconnect' ? 'connecting' : account.state;
   const tone = account.connected ? 'success' : state === 'error' ? 'error' : 'warning';
-  return h('article', { className: 'dxw-card', tabIndex: -1, 'data-bot-id': account.botId },
-    h('div', { className: 'dxw-cardBody' },
-      h('div', { className: 'dxw-accountTop' },
-        h('div', { className: 'dxw-accountIdentity' },
-          h('div', { className: 'dxw-avatar', 'aria-hidden': 'true' }, h(WeixinLogoGlyph, { size: 27 })),
-          h('div', null, h('h3', null, account.bot.name), h('p', null, account.bot.accountIdMasked))),
-        h('div', { className: 'dxw-health' },
-          h('span', { className: 'dxw-dot', 'data-tone': tone }),
+  return h('article', { className: 'dxw-card dim-botCard', tabIndex: -1, 'data-bot-id': account.botId },
+    h('div', { className: 'dxw-cardBody dim-botCardBody' },
+      h('div', { className: 'dxw-accountTop dim-botCardTop' },
+        h('div', { className: 'dxw-accountIdentity dim-botIdentity' },
+          h('div', { className: 'dxw-avatar dim-botAvatar', 'aria-hidden': 'true' }, h(WeixinLogoGlyph, { size: 27 })),
+          h('div', { className: 'dim-botName' }, h('h3', null, account.bot.name), h('p', null, account.bot.accountIdMasked))),
+        h('div', { className: 'dxw-health dim-botHealth' },
+          h('span', { className: 'dxw-dot dim-healthDot', 'data-tone': tone }),
           h('span', null, account.connected ? '运行正常' : state === 'connecting' ? '正在连接' : '连接未就绪'))),
-      h('dl', { className: 'dxw-metrics' },
-        h('div', { className: 'dxw-metric' }, h('dt', null, '消息通道'),
+      h('dl', { className: 'dxw-metrics dim-botMetrics' },
+        h('div', { className: 'dxw-metric dim-botMetric' }, h('dt', null, '消息通道'),
           h('dd', null, account.connected ? 'iLink 长轮询' : '离线')),
-        h('div', { className: 'dxw-metric' }, h('dt', null, '最近检查'),
+        h('div', { className: 'dxw-metric dim-botMetric' }, h('dt', null, '最近检查'),
           h('dd', null, checkedTime(account.health.lastCheckedAt)))),
-      h('div', { className: 'dxw-accountFooter' },
-        h('div', { className: 'dxw-summary' }, account.error?.message ?? account.health.summary),
-        h('div', { className: 'dxw-actions' },
-          h(Button, { onClick: onReconnect, disabled: Boolean(busy) },
+      h('div', { className: 'dxw-accountFooter dim-cardFooter' },
+        h('div', { className: 'dxw-summary dim-cardSummary' }, account.error?.message ?? account.health.summary),
+        h('div', { className: 'dxw-actions dim-cardActions' },
+          h(Button, { className: 'dim-cardAction', onClick: onReconnect, disabled: Boolean(busy) },
             busy === 'reconnect' ? '检查中…' : account.connected ? '检查连接' : '重试连接'),
-          h(Button, { kind: 'danger', onClick: onRequestRemove, disabled: Boolean(busy) }, '移除接入')))),
-    removing ? h('div', { className: 'dxw-confirm', role: 'alertdialog' },
+          h(Button, { className: 'dim-cardAction', kind: 'danger', onClick: onRequestRemove, disabled: Boolean(busy) }, '移除接入')))),
+    removing ? h('div', { className: 'dxw-confirm dim-confirm', role: 'alertdialog' },
       h('strong', null, '从此 Harness 移除这个微信账号？'),
       h('p', null, '这会停止消息连接，并删除本机保存的 bot_token、账号配置和会话映射。其他微信账号不受影响。'),
-      h('div', { className: 'dxw-actions' },
+      h('div', { className: 'dxw-actions dim-viewActions' },
         h(Button, { onClick: onCancelRemove, disabled: busy === 'delete' }, '保留账号'),
         h(Button, { kind: 'danger', onClick: onConfirmRemove, disabled: busy === 'delete' },
           busy === 'delete' ? '正在移除…' : '确认移除')))
@@ -228,9 +226,9 @@ export function AccountCard({ account, busy, removing, onReconnect, onRequestRem
 }
 
 function AccountList(props) {
-  return h('section', null,
-    h('div', { className: 'dxw-listHeading' }, h('h3', null, '已接入的微信账号'), h('span', null, `${props.bots.length} 个`)),
-    h('ul', { className: 'dxw-list' }, props.bots.map((account) => h('li', { key: account.botId },
+  return h('section', { className: 'dim-listSection' },
+    h('div', { className: 'dxw-listHeading dim-listHeading' }, h('h3', null, '已接入的微信账号'), h('span', null, `${props.bots.length} 个`)),
+    h('ul', { className: 'dxw-list dim-botList' }, props.bots.map((account) => h('li', { key: account.botId },
       h(AccountCard, {
         account,
         busy: props.busyByBot[account.botId],
@@ -523,7 +521,7 @@ export function WeixinSettingsTab({ rpcCall }) {
     });
   }
 
-  return h('section', { className: 'dxw-page', 'aria-label': '微信设置' },
+  return h('section', { className: 'dxw-page dim-channelPage', 'aria-label': '微信设置' },
     h(Heading, {
       totals: model.totals,
       adding: Boolean(provision),
@@ -533,13 +531,13 @@ export function WeixinSettingsTab({ rpcCall }) {
     }),
     h('div', { className: 'dxw-visuallyHidden', role: 'status', 'aria-live': 'polite' }, notice),
     model.error && model.phase === 'ready'
-      ? h('div', { className: 'dxw-statusNotice' }, `状态刷新失败：${model.error.message}`)
+      ? h('div', { className: 'dxw-statusNotice dim-statusNotice' }, `状态刷新失败：${model.error.message}`)
       : null,
     model.phase === 'loading'
       ? h(LoadingView)
       : model.phase === 'error'
-        ? h('div', { className: 'dxw-card' },
-            h('div', { className: 'dxw-error' },
+        ? h('div', { className: 'dxw-card dim-surfaceCard' },
+            h('div', { className: 'dxw-error dim-inlineError' },
               h('h3', null, '无法读取微信状态'),
               h('p', null, model.error?.message ?? '请稍后重试'),
               h(Button, { onClick: () => void loadStatus() }, '重新读取')))

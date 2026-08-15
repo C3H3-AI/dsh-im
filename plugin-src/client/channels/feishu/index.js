@@ -129,58 +129,51 @@ function Heading({ totals, onAdd, adding, busy, addButtonRef }) {
   const hasBots = totals.configured > 0;
   return h("div", { className: "bxf-heading" },
     h("div", { className: "bxf-headingTools" },
-      hasBots
-        ? h("div", {
-            className: "bxf-totalBadge",
-            "aria-label": `已接入 ${totals.configured} 个机器人，其中 ${totals.connected} 个在线`,
-          }, h("strong", null, totals.connected), h("span", null, `/ ${totals.configured} 在线`))
-        : null,
-      h("div", {
-        className: "bxf-localBadge",
-        title: "每个应用的凭据均由 Host 独立保存，不会发送到浏览器",
-      }, h(ShieldIcon, { size: 14 }), h("span", null, "凭据仅保存在本机")),
       h(Button, {
         kind: "primary",
         size: "small",
-        className: "bxf-bindButton",
+        className: "bxf-bindButton dim-scanButton",
         onClick: onAdd,
         disabled: adding || busy,
         ref: addButtonRef,
         "aria-busy": busy ? "true" : undefined,
       }, adding ? "正在绑定" : "扫码绑定机器人"),
+      hasBots
+        ? h("div", {
+            className: "bxf-totalBadge dim-onlineBadge",
+            "aria-label": `已接入 ${totals.configured} 个机器人，其中 ${totals.connected} 个在线`,
+          }, h("span", null, `${totals.connected} / ${totals.configured} 在线`))
+        : null,
     ),
   );
 }
 
 function LoadingView() {
   return h("div", {
-    className: "bxf-card", "aria-busy": "true", "aria-label": "正在读取飞书机器人列表",
-  }, h("div", { className: "bxf-skeleton" },
-    h("div", { className: "bxf-skeletonLine" }),
-    h("div", { className: "bxf-skeletonLine" }),
-    h("div", { className: "bxf-skeletonLine" }),
-    h("div", { className: "bxf-skeletonLine" }),
-    h("div", { className: "bxf-skeletonBox" }),
-  ));
+    className: "bxf-card dim-surfaceCard dim-loadingView",
+    "aria-busy": "true",
+    "aria-label": "正在读取飞书机器人列表",
+  },
+    h("div", { className: "dim-spinner", "aria-hidden": "true" }),
+    h("span", null, "正在读取飞书连接状态…"),
+  );
 }
 
 function EmptyView({ onStart, busy }) {
-  return h("div", { className: "bxf-card" },
-    h("div", { className: "bxf-cardBody bxf-intro" },
-      h("div", { className: "bxf-introCopy" },
-        h("div", { className: "bxf-stateLabel" },
-          h("span", { className: "bxf-dot" }), h("span", null, "尚未接入机器人")),
+  return h("div", { className: "bxf-card dim-surfaceCard" },
+    h("div", { className: "bxf-cardBody bxf-intro dim-surfaceBody dim-emptyView" },
+      h("div", { className: "bxf-introCopy dim-emptyCopy" },
+        h("div", { className: "bxf-stateLabel dim-stateLabel" },
+          h("span", { className: "bxf-dot dim-stateDot" }), h("span", null, "尚未接入机器人")),
         h("h3", null, "扫码，创建第一个飞书入口"),
         h("p", null, "无需手动填写 App ID。以后还可以继续添加机器人，分别服务不同团队或飞书租户。"),
-        h("div", { className: "bxf-actions" },
+        h("div", { className: "bxf-actions dim-viewActions" },
           h(Button, {
-            kind: "primary", icon: h(SparkIcon), onClick: onStart,
+            kind: "primary", onClick: onStart,
             disabled: busy, "aria-busy": busy ? "true" : undefined,
-          }, busy ? "正在创建…" : "一键创建飞书机器人")),
-        h("div", { className: "bxf-note" }, h(ShieldIcon, { size: 16 }),
-          h("span", null, "每个 App Secret 都只写入 Host 凭据存储，浏览器不会收到 Secret。")),
+          }, busy ? "正在生成二维码…" : "生成飞书二维码")),
       ),
-      h("div", { className: "bxf-markStage", "aria-hidden": "true" }, h(BrandMark)),
+      h("div", { className: "bxf-markStage dim-emptyBrand", "aria-hidden": "true" }, h(BrandMark)),
     ),
   );
 }
@@ -212,57 +205,57 @@ function QrPane({ provision, now, onRefresh, onCancel, busy }) {
 
   React.useEffect(() => setImageFailed(false), [qrSource]);
 
-  return h("div", { className: "bxf-card bxf-provisionCard" },
-    h("div", { className: "bxf-cardBody bxf-qrLayout" },
-      h("div", { className: "bxf-qrColumn" },
-        h("div", { className: "bxf-qrFrame" },
+  return h("div", { className: "bxf-card bxf-provisionCard dim-surfaceCard" },
+    h("div", { className: "bxf-cardBody bxf-qrLayout dim-surfaceBody dim-qrLayout" },
+      h("div", { className: "bxf-qrColumn dim-qrColumn" },
+        h("div", { className: "bxf-qrFrame dim-qrFrame" },
           qrSource && !imageFailed
             ? h("img", {
                 src: qrSource,
                 alt: "用于新增 DeepSeek Harness 飞书机器人的一次性授权二维码",
                 onError: () => setImageFailed(true),
               })
-            : h("div", { className: "bxf-qrFallback" },
+            : h("div", { className: "bxf-qrFallback dim-qrFallback" },
                 h("div", null, h(QrIcon), h("span", null, "二维码未就绪，请打开授权链接"))),
           expired
-            ? h("div", { className: "bxf-expiredOverlay", role: "status" },
+            ? h("div", { className: "bxf-expiredOverlay dim-qrExpired", role: "status" },
                 h("div", null, "二维码已失效", h("br"), "请刷新后重新扫码"))
             : null,
         ),
         h("div", {
-          className: "bxf-countdown",
+          className: "bxf-countdown dim-countdown",
           "aria-label": expired ? "二维码已失效" : `二维码剩余 ${formatRemaining(remaining)}`,
         },
-          h("div", { className: "bxf-countdownTop", "aria-hidden": "true" },
+          h("div", { className: "bxf-countdownTop dim-countdownTop", "aria-hidden": "true" },
             h("span", null, expired ? "等待刷新" : "二维码有效时间"),
             h("strong", null, formatRemaining(remaining))),
-          h("div", { className: "bxf-progress", "aria-hidden": "true" },
+          h("div", { className: "bxf-progress dim-progress", "aria-hidden": "true" },
             h("span", { style: { "--bxf-progress": `${Math.round(progress * 100)}%` } })),
         ),
       ),
-      h("div", { className: "bxf-qrCopy" },
-        h("div", { className: "bxf-stateLabel" },
-          h("span", { className: "bxf-dot", "data-tone": "warning" }),
+      h("div", { className: "bxf-qrCopy dim-qrCopy" },
+        h("div", { className: "bxf-stateLabel dim-stateLabel" },
+          h("span", { className: "bxf-dot dim-stateDot", "data-tone": "warning" }),
           h("span", null, "正在添加新机器人")),
         h("h3", null, expired ? "刷新二维码后继续" : "使用飞书扫码创建机器人"),
         h("p", null, "扫码只会新增一个机器人，已接入的机器人会继续正常收发消息。"),
-        h("ol", { className: "bxf-steps" },
+        h("ol", { className: "bxf-steps dim-steps" },
           h("li", null, "打开飞书移动端，使用扫一扫读取二维码"),
           h("li", null, "核对应用名称与权限范围，并确认创建"),
           h("li", null, "保持本页打开，等待新机器人的长连接就绪")),
-        h("div", { className: "bxf-actions" },
+        h("div", { className: "bxf-actions dim-viewActions" },
           expired
             ? h(Button, {
-                kind: "primary", icon: h(RefreshIcon), onClick: onRefresh, disabled: busy,
+                kind: "primary", onClick: onRefresh, disabled: busy,
               }, busy ? "刷新中…" : "刷新二维码")
             : href
               ? h("a", {
                   className: "bxf-button bxf-link", "data-kind": "secondary",
                   href, target: "_blank", rel: "noopener noreferrer",
-                }, h(ExternalIcon), h("span", null, "在飞书中打开"))
+                }, h("span", null, "在飞书中打开"))
               : null,
           !expired
-            ? h(Button, { icon: h(RefreshIcon), onClick: onRefresh, disabled: busy }, "换一个二维码")
+            ? h(Button, { onClick: onRefresh, disabled: busy }, "换一个二维码")
             : null,
           h(Button, { onClick: onCancel, disabled: busy }, "取消添加")),
       ),
@@ -272,35 +265,31 @@ function QrPane({ provision, now, onRefresh, onCancel, busy }) {
 
 function ProvisionProgress({ phase, onCancel, busy }) {
   const connecting = phase === "connecting";
-  return h("div", { className: "bxf-card bxf-provisionCard", "aria-busy": "true" },
-    h("div", { className: "bxf-connecting bxf-connectingCompact" },
-      h("div", { className: "bxf-connectingCopy" },
-        h("div", { className: "bxf-orbit" },
-          h("div", { className: "bxf-orbitCore" },
-            connecting ? h(RobotIcon, { size: 24 }) : h(SparkIcon, { size: 24 }))),
-        h("h3", null, connecting ? "已确认，正在连接新机器人" : "正在准备授权二维码"),
-        h("p", null, connecting
-          ? "正在安全保存凭据并检查新机器人的消息通道，其他机器人不会中断。"
-          : "正在向飞书申请一次性授权二维码，请稍候。"),
-        connecting
-          ? h("div", { className: "bxf-actions", style: { justifyContent: "center" } },
-              h(Button, { onClick: onCancel, disabled: busy }, "取消添加"))
-          : null,
-      ),
-    ),
+  return h("div", {
+    className: "bxf-card bxf-provisionCard dim-surfaceCard dim-loadingView",
+    "aria-busy": "true",
+  },
+    h("div", { className: "dim-spinner", "aria-hidden": "true" }),
+    h("h3", null, connecting ? "已确认，正在连接新机器人" : "正在准备授权二维码"),
+    h("p", null, connecting
+      ? "正在安全保存凭据并检查新机器人的消息通道，其他机器人不会中断。"
+      : "正在向飞书申请一次性授权二维码，请稍候。"),
+    connecting
+      ? h("div", { className: "bxf-actions dim-viewActions", style: { justifyContent: "center" } },
+          h(Button, { onClick: onCancel, disabled: busy }, "取消添加"))
+      : null,
   );
 }
 
 function ProvisionError({ error, onRetry, onCancel, busy }) {
-  return h("div", { className: "bxf-card bxf-provisionCard" },
-    h("div", { className: "bxf-inlineError", role: "alert" },
-      h("div", { className: "bxf-errorIcon" }, h(AlertIcon)),
+  return h("div", { className: "bxf-card bxf-provisionCard dim-surfaceCard" },
+    h("div", { className: "bxf-inlineError dim-inlineError", role: "alert" },
       h("div", null,
         h("h3", null, "新机器人没有添加完成"),
         h("p", null, error.message),
         error.code ? h("span", { className: "bxf-errorCode" }, error.code) : null,
-        h("div", { className: "bxf-actions" },
-          h(Button, { kind: "primary", icon: h(RefreshIcon), onClick: onRetry, disabled: busy },
+        h("div", { className: "bxf-actions dim-viewActions" },
+          h(Button, { kind: "primary", onClick: onRetry, disabled: busy },
             busy ? "重试中…" : "重新生成二维码"),
           h(Button, { onClick: onCancel, disabled: busy }, "关闭")),
       ),
@@ -335,7 +324,7 @@ function RemoveConfirmation({ bot, busy, onConfirm, onCancel }) {
   React.useEffect(() => cancelRef.current?.focus(), []);
 
   return h("div", {
-    className: "bxf-confirm",
+    className: "bxf-confirm dim-confirm",
     role: "alertdialog",
     "aria-labelledby": titleId,
     "aria-describedby": descriptionId,
@@ -349,7 +338,7 @@ function RemoveConfirmation({ bot, busy, onConfirm, onCancel }) {
     h("h4", { id: titleId }, `从 DeepSeek Harness 移除“${bot.bot.name}”？`),
     h("p", { id: descriptionId },
       "此操作会停止这个机器人的连接，并删除保存在本机的接入配置和凭据。飞书开放平台中的应用不会被自动删除，其他机器人也不受影响。"),
-    h("div", { className: "bxf-actions" },
+    h("div", { className: "bxf-actions dim-viewActions" },
       h(Button, { ref: cancelRef, onClick: onCancel, disabled: busy }, "保留机器人"),
       h(Button, { kind: "danger", onClick: onConfirm, disabled: busy },
         busy ? "正在移除…" : "确认移除接入")),
@@ -382,43 +371,42 @@ export function BotCard({
     ?? health.summary;
   const titleId = `bxf-bot-${connection.botId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
   return h("article", {
-    className: "bxf-card bxf-botCard",
+    className: "bxf-card bxf-botCard dim-botCard",
     "aria-labelledby": titleId,
     "data-bot-id": connection.botId,
     tabIndex: -1,
     ref: cardRef,
   },
-    h("div", { className: "bxf-cardBody" },
-      h("div", { className: "bxf-connectedTop" },
-        h("div", { className: "bxf-botIdentity" },
-          h("div", { className: "bxf-avatar", "aria-hidden": "true" },
+    h("div", { className: "bxf-cardBody dim-botCardBody" },
+      h("div", { className: "bxf-connectedTop dim-botCardTop" },
+        h("div", { className: "bxf-botIdentity dim-botIdentity" },
+          h("div", { className: "bxf-avatar dim-botAvatar", "aria-hidden": "true" },
             h(FeishuLogoGlyph, { size: 34 })),
-          h("div", { className: "bxf-botName" },
+          h("div", { className: "bxf-botName dim-botName" },
             h("h3", { id: titleId, title: bot.name }, bot.name),
             h("p", { title: bot.appIdMasked }, bot.appIdMasked ?? "应用标识已安全保存")),
         ),
-        h("div", { className: "bxf-healthPill", "data-health": stateForDisplay },
-          h("span", { className: "bxf-dot", "data-tone": tone }),
+        h("div", { className: "bxf-healthPill dim-botHealth", "data-health": stateForDisplay },
+          h("span", { className: "bxf-dot dim-healthDot", "data-tone": tone }),
           h("span", null, HEALTH_LABELS[stateForDisplay] ?? "状态未知")),
       ),
-      h("dl", { className: "bxf-statusGrid" },
-        h("div", { className: "bxf-metric" }, h("dt", null, "消息通道"),
+      h("dl", { className: "bxf-statusGrid dim-botMetrics" },
+        h("div", { className: "bxf-metric dim-botMetric" }, h("dt", null, "消息通道"),
           h("dd", null, connected ? "长连接" : stateForDisplay === "connecting" ? "连接中" : "已断开")),
-        h("div", { className: "bxf-metric" }, h("dt", null, "最近检查"),
+        h("div", { className: "bxf-metric dim-botMetric" }, h("dt", null, "最近检查"),
           h("dd", null, formatCheckedTime(health.lastCheckedAt))),
       ),
-      h("div", { className: "bxf-divider" }),
-      h("div", { className: "bxf-connectedFooter" },
-        h("div", { className: "bxf-healthSummary", "data-error": actionError || connection.error ? "true" : undefined },
-          h("strong", null, "连接状态："), h("span", null, summary)),
-        h("div", { className: "bxf-actions bxf-botActions" },
+      h("div", { className: "bxf-connectedFooter dim-cardFooter" },
+        h("div", { className: "bxf-healthSummary dim-cardSummary", "data-error": actionError || connection.error ? "true" : undefined },
+          summary),
+        h("div", { className: "bxf-actions bxf-botActions dim-cardActions" },
           h(Button, {
-            size: "small", icon: h(RefreshIcon), onClick: onReconnect,
+            className: "dim-cardAction", onClick: onReconnect,
             disabled: Boolean(busy), "aria-busy": busy === "reconnect" ? "true" : undefined,
             "aria-label": `${connected ? "检查连接" : "重试连接"}${bot.name}`,
           }, busy === "reconnect" ? (connected ? "检查中…" : "正在连接…") : connected ? "检查连接" : "重试连接"),
           h(Button, {
-            size: "small", kind: "danger", onClick: onRequestRemove,
+            className: "dim-cardAction", kind: "danger", onClick: onRequestRemove,
             disabled: Boolean(busy), ref: removeButtonRef,
             "aria-label": `从 DeepSeek Harness 移除${bot.name}`,
           }, "移除接入")),
@@ -436,11 +424,11 @@ export function BotCard({
 }
 
 function BotList(props) {
-  return h("section", { className: "bxf-listSection", "aria-labelledby": "bxf-bot-list-title" },
-    h("div", { className: "bxf-listHeading" },
+  return h("section", { className: "bxf-listSection dim-listSection", "aria-labelledby": "bxf-bot-list-title" },
+    h("div", { className: "bxf-listHeading dim-listHeading" },
       h("h3", { id: "bxf-bot-list-title" }, "已接入的机器人"),
       h("span", null, `${props.bots.length} 个`)),
-    h("ul", { className: "bxf-botList", role: "list" },
+    h("ul", { className: "bxf-botList dim-botList", role: "list" },
       props.bots.map((bot) => h("li", { key: bot.botId },
         h(BotCard, {
           connection: bot,
@@ -459,15 +447,14 @@ function BotList(props) {
 }
 
 function PageError({ error, onRetry, busy }) {
-  return h("div", { className: "bxf-card" },
-    h("div", { className: "bxf-error", role: "alert" },
-      h("div", { className: "bxf-errorIcon" }, h(AlertIcon)),
+  return h("div", { className: "bxf-card dim-surfaceCard" },
+    h("div", { className: "bxf-error dim-inlineError", role: "alert" },
       h("div", null,
         h("h3", null, "无法读取飞书机器人"),
         h("p", null, error.message),
         error.code ? h("span", { className: "bxf-errorCode" }, error.code) : null,
-        h("div", { className: "bxf-actions" },
-          h(Button, { kind: "primary", icon: h(RefreshIcon), onClick: onRetry, disabled: busy },
+        h("div", { className: "bxf-actions dim-viewActions" },
+          h(Button, { kind: "primary", onClick: onRetry, disabled: busy },
             busy ? "重试中…" : "重新读取"))),
     ),
   );
@@ -874,7 +861,7 @@ export function FeishuSettingsTab({ rpcCall }) {
     else removeButtonRefs.current.delete(botId);
   }, []);
 
-  return h("section", { className: "bxf-page", "aria-label": "飞书机器人设置" },
+  return h("section", { className: "bxf-page dim-channelPage", "aria-label": "飞书机器人设置" },
     h(Heading, {
       totals: model.totals,
       onAdd: () => void startProvisioning(),
@@ -886,7 +873,7 @@ export function FeishuSettingsTab({ rpcCall }) {
       className: "bxf-visuallyHidden", role: "status", "aria-live": "polite", "aria-atomic": "true",
     }, announcement),
     model.statusError
-      ? h("div", { className: "bxf-statusNotice", role: "status" },
+      ? h("div", { className: "bxf-statusNotice dim-statusNotice", role: "status" },
           h(AlertIcon, { size: 16 }),
           h("span", null, `状态自动刷新失败：${model.statusError.message}`),
           h(Button, { size: "small", onClick: () => void loadStatus({ silent: true }), disabled: pageBusy }, "立即重试"))
