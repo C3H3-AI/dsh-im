@@ -6,11 +6,13 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { IMSettingsTab } from '../plugin-src/client/index.js';
+import { DINGTALK_ENDPOINTS } from '../plugin-src/client/channels/dingtalk/api.js';
 
 const STYLES_URL = new URL('../plugin-src/client/styles.js', import.meta.url);
 const CLIENT_BUNDLE_URL = new URL('../lib/client.js', import.meta.url);
 const DINGTALK_CLIENT_SOURCE_URL = new URL(
-  import.meta.resolve('@xmanrui/dsh-dingtalk/client-source'),
+  '../plugin-src/client/channels/dingtalk/index.js',
+  import.meta.url,
 );
 
 test('IM settings renders three compact logo channel tabs without enable switches', () => {
@@ -48,8 +50,7 @@ test('the DingTalk QR card stacks within the narrow combined-channel panel', asy
 });
 
 test('the bundled DingTalk channel has no local sender approval workflow', async () => {
-  const [{ DINGTALK_ENDPOINTS }, source, bundle] = await Promise.all([
-    import('@xmanrui/dsh-dingtalk/client-api'),
+  const [source, bundle] = await Promise.all([
     readFile(DINGTALK_CLIENT_SOURCE_URL, 'utf8'),
     readFile(CLIENT_BUNDLE_URL, 'utf8'),
   ]);

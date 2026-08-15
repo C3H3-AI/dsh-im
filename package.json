@@ -50,20 +50,21 @@
   },
   "scripts": {
     "build": "node plugin-src/client/build.mjs && node plugin-src/host/build.mjs",
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test test/*.test.mjs test/channels/*/*.test.mjs",
     "check": "npm test && npm run build && node scripts/verify-package.mjs"
   },
   "engines": {
     "node": ">=22.19"
   },
   "dependencies": {
-    "@xmanrui/dsh-dingtalk": "https://github.com/xmanrui/dsh-dingtalk/archive/05f5a319b52ef7f0952baf5d603ebc144657262a.tar.gz",
-    "@xmanrui/dsh-feishu": "https://github.com/xmanrui/dsh-feishu/archive/aad650feabadd511241aa58b236d64273d5e397f.tar.gz",
-    "@xmanrui/dsh-weixin": "https://github.com/xmanrui/dsh-weixin/archive/76d076771b2c84fb4c5598c2344d486695eda080.tar.gz"
+    "@larksuiteoapi/node-sdk": "1.73.0",
+    "dingtalk-stream": "2.1.4",
+    "qrcode": "1.5.4"
   },
   "devDependencies": {
     "esbuild": "0.25.9",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "react-test-renderer": "18.3.1"
   }
 }

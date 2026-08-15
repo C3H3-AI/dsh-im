@@ -1,7 +1,7 @@
 import * as React from 'react';
 
-import { DINGTALK_RPC_CHANNEL } from '@xmanrui/dsh-dingtalk/client-api';
-import { DingtalkSettingsTab } from '@xmanrui/dsh-dingtalk/client-source';
+import { DINGTALK_RPC_CHANNEL } from './channels/dingtalk/api.js';
+import { DingtalkSettingsTab } from './channels/dingtalk/index.js';
 import { FeishuSettingsTab } from './channels/feishu/index.js';
 import { FEISHU_RPC_CHANNEL } from './channels/feishu/api.js';
 import { installFeishuStyles } from './channels/feishu/styles.js';

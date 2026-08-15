@@ -31,6 +31,7 @@ npx -y github:xmanrui/dsh-im install
 ## 设计
 
 - Harness 中只注册一个「IM机器人」设置页；
+- 飞书、微信和钉钉的 Host、客户端与运行时源码都在本仓库维护，不依赖外部 `dsh-feishu`、`dsh-weixin` 或 `dsh-dingtalk` 插件；
 - 左侧使用渠道 Logo 切换微信、飞书和钉钉，不使用启用/停用开关；
 - 三个渠道保持独立的 RPC、凭据、连接监督和会话映射；
 - 浏览器只获得二维码和脱敏状态，不获得 App Secret、`bot_token`、钉钉 `client_secret` 或原始 staff ID。
@@ -78,6 +79,7 @@ For DingTalk, scan with an account that belongs to an enterprise or organization
 ## Design
 
 - Registers a single **IM Bot** settings page in Harness.
+- Maintains the Feishu, WeChat, and DingTalk Host, client, and runtime sources in this repository without external `dsh-feishu`, `dsh-weixin`, or `dsh-dingtalk` plugin dependencies.
 - Uses channel logos for WeChat, Feishu, and DingTalk navigation without enable/disable switches.
 - Keeps RPC endpoints, credentials, connection supervision, and session mappings isolated by channel.
 - Sends only QR codes and redacted status data to the browser, never App Secrets, `bot_token`, DingTalk `client_secret`, or raw staff IDs.

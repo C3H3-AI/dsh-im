@@ -1,7 +1,11 @@
 # Third-party notices
 
-This package composes [`@xmanrui/dsh-feishu`](https://github.com/xmanrui/dsh-feishu) at commit `aad650feabadd511241aa58b236d64273d5e397f`, [`@xmanrui/dsh-weixin`](https://github.com/xmanrui/dsh-weixin) at commit `76d076771b2c84fb4c5598c2344d486695eda080`, and [`@xmanrui/dsh-dingtalk`](https://github.com/xmanrui/dsh-dingtalk) at commit `05f5a319b52ef7f0952baf5d603ebc144657262a`, all under the MIT License.
+The Weixin iLink request format, QR-login states, and message fields are adapted from Tencent's [`openclaw-weixin`](https://github.com/Tencent/openclaw-weixin) project at commit `cef0bfc390393f716903e16d50408118047f87e0` (package version 2.4.6), licensed under the MIT License and copyright Tencent.
 
-The channel client components are adapted from those projects and preserve their security model: secrets remain in the DeepSeek Harness Host credential provider and never enter the browser-facing RPC response.
+The DingTalk device-authorization request sequence and AI Card streaming protocol are adapted from DingTalk Real Team's [`dingtalk-openclaw-connector`](https://github.com/DingTalk-Real-AI/dingtalk-openclaw-connector) project at commit `b2fd6e5ea2ff99bd213faac637d3da541b2bfaf4`, licensed under the MIT License and copyright 2026 DingTalk Real Team.
+
+This package depends on [`@larksuiteoapi/node-sdk`](https://github.com/larksuite/node-sdk) 1.73.0, [`dingtalk-stream`](https://github.com/open-dingtalk/dingtalk-stream-sdk-nodejs) 2.1.4, and [`qrcode`](https://github.com/soldair/node-qrcode) 1.5.4. Each is licensed under the MIT License; `dingtalk-stream` is copyright 2023 钉钉开放平台团队.
+
+This project is an independent DeepSeek Harness integration. It does not bundle OpenClaw and is not endorsed by Tencent, Feishu, or DingTalk.
 
 The WeChat mark uses path data published by Simple Icons under the CC0 1.0 Universal license. The Feishu and DingTalk marks are inline vectors used for channel identification. Product names and logos remain trademarks of their respective owners.

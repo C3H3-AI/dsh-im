@@ -1,6 +1,6 @@
-import { apply as applyDingtalk } from '@xmanrui/dsh-dingtalk';
-import { apply as applyFeishu } from '@xmanrui/dsh-feishu';
-import { apply as applyWeixin } from '@xmanrui/dsh-weixin';
+import { apply as applyDingtalk } from './channels/dingtalk/index.mjs';
+import { apply as applyFeishu } from './channels/feishu/index.mjs';
+import { apply as applyWeixin } from './channels/weixin/index.mjs';
 
 export const name = 'dsh-im-host';
 export const inject = ['connection', 'credentials', 'webServer'];
