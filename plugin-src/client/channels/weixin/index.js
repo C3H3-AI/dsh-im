@@ -11,6 +11,7 @@ import {
   safeVerificationUrl,
   unwrapRpcResult,
 } from './api.js';
+import { createPollScheduler, useAnimationFrameScheduler } from '../../lifecycle.js';
 import { installWeixinStyles } from './styles.js';
 
 const h = React.createElement;
@@ -267,6 +268,20 @@ function AccountList(props) {
 
 const EMPTY_TOTALS = Object.freeze({ configured: 0, connected: 0 });
 
+export function mergeWeixinProvisioningSnapshot(
+  current,
+  incoming,
+  { restoreProvisioning = false } = {},
+) {
+  if (!incoming || (!current && !restoreProvisioning)) return current;
+  if (current && current.attemptId !== incoming.attemptId) return current;
+  return {
+    ...current,
+    ...incoming,
+    durationMs: current?.durationMs ?? 5 * 60_000,
+  };
+}
+
 export function WeixinSettingsTab({ rpcCall }) {
   const [model, setModel] = React.useState({
     phase: 'loading', bots: [], totals: EMPTY_TOTALS, revision: 0, error: null,
@@ -278,30 +293,40 @@ export function WeixinSettingsTab({ rpcCall }) {
   const [notice, setNotice] = React.useState('');
   const [now, setNow] = React.useState(() => Date.now());
   const addButtonRef = React.useRef(null);
+  const scheduleAnimationFrame = useAnimationFrameScheduler();
 
   const announce = React.useCallback((value) => {
     setNotice('');
-    if (value) window.requestAnimationFrame(() => setNotice(value));
-  }, []);
+    scheduleAnimationFrame(() => {
+      if (value) setNotice(value);
+    }, 'announcement');
+  }, [scheduleAnimationFrame]);
   const invoke = React.useCallback(async (endpoint, payload = {}, signal) => {
     return unwrapRpcResult(await rpcCall(endpoint, payload, signal));
   }, [rpcCall]);
-  const loadStatus = React.useCallback(async ({ signal, silent = false } = {}) => {
+  const loadStatus = React.useCallback(async ({
+    signal,
+    silent = false,
+    restoreProvisioning = false,
+  } = {}) => {
     if (!silent) setModel((current) => ({ ...current, phase: 'loading', error: null }));
     try {
       const snapshot = normalizeSnapshot(await invoke(WEIXIN_ENDPOINTS.status, {}, signal));
+      if (signal?.aborted) return undefined;
       setModel({
         phase: 'ready', bots: snapshot.bots, totals: snapshot.totals,
         revision: snapshot.revision, error: null,
       });
       if (snapshot.provisioning) {
-        setProvision((current) => !current || current.attemptId === snapshot.provisioning.attemptId
-          ? { ...current, ...snapshot.provisioning, durationMs: current?.durationMs ?? 5 * 60_000 }
-          : current);
+        setProvision((current) => mergeWeixinProvisioningSnapshot(
+          current,
+          snapshot.provisioning,
+          { restoreProvisioning },
+        ));
       }
       return snapshot;
     } catch (error) {
-      if (error?.name === 'AbortError') return undefined;
+      if (signal?.aborted || error?.name === 'AbortError') return undefined;
       setModel((current) => ({
         ...current,
         phase: silent && current.phase === 'ready' ? 'ready' : 'error',
@@ -313,7 +338,7 @@ export function WeixinSettingsTab({ rpcCall }) {
 
   React.useEffect(() => {
     const controller = new AbortController();
-    void loadStatus({ signal: controller.signal });
+    void loadStatus({ signal: controller.signal, restoreProvisioning: true });
     return () => controller.abort();
   }, [loadStatus]);
 
@@ -324,7 +349,11 @@ export function WeixinSettingsTab({ rpcCall }) {
     const timer = window.setInterval(async () => {
       if (running) return;
       running = true;
-      await loadStatus({ signal: controller.signal, silent: true });
+      await loadStatus({
+        signal: controller.signal,
+        silent: true,
+        restoreProvisioning: false,
+      });
       running = false;
     }, 15_000);
     return () => {
@@ -369,13 +398,13 @@ export function WeixinSettingsTab({ rpcCall }) {
       }
       setProvision(null);
       announce('已取消微信绑定。');
-      window.requestAnimationFrame(() => addButtonRef.current?.focus());
+      scheduleAnimationFrame(() => addButtonRef.current?.focus(), 'focus');
     } catch (error) {
       setProvision((current) => ({ ...current, status: 'failed', error: presentError(error) }));
     } finally {
       setBusy(false);
     }
-  }, [announce, invoke, provision?.attemptId, provision?.status]);
+  }, [announce, invoke, provision?.attemptId, provision?.status, scheduleAnimationFrame]);
 
   const submitVerification = React.useCallback(async (verifyCode) => {
     if (!provision?.attemptId) return;
@@ -398,7 +427,10 @@ export function WeixinSettingsTab({ rpcCall }) {
     const attemptId = provision?.attemptId;
     if (!attemptId || !['pending', 'scanned', 'connecting'].includes(provision.status)) return undefined;
     const controller = new AbortController();
-    let timer;
+    const scheduler = createPollScheduler({
+      setTimeoutFn: (callback, delayMs) => window.setTimeout(callback, delayMs),
+      clearTimeoutFn: (timer) => window.clearTimeout(timer),
+    });
     const poll = async () => {
       try {
         const result = normalizeProvisioning(await invoke(
@@ -406,14 +438,20 @@ export function WeixinSettingsTab({ rpcCall }) {
           { attemptId },
           controller.signal,
         ));
+        if (scheduler.disposed) return;
         if (result.status === 'connected') {
-          const snapshot = await loadStatus({ signal: controller.signal, silent: true });
+          const snapshot = await loadStatus({
+            signal: controller.signal,
+            silent: true,
+            restoreProvisioning: false,
+          });
+          if (scheduler.disposed) return;
           const account = snapshot?.bots.find((bot) => bot.botId === result.botId);
           if (!account?.connected) {
             setProvision((current) => current?.attemptId === attemptId
               ? { ...current, ...result, status: 'connecting' }
               : current);
-            timer = window.setTimeout(poll, result.pollIntervalMs);
+            scheduler.schedule(poll, result.pollIntervalMs);
             return;
           }
           setProvision(null);
@@ -426,19 +464,19 @@ export function WeixinSettingsTab({ rpcCall }) {
           ? { ...current, ...result, durationMs: current.durationMs }
           : current);
         if (['pending', 'scanned', 'connecting'].includes(result.status)) {
-          timer = window.setTimeout(poll, result.pollIntervalMs);
+          scheduler.schedule(poll, result.pollIntervalMs);
         }
       } catch (error) {
-        if (error?.name === 'AbortError') return;
+        if (scheduler.disposed || error?.name === 'AbortError') return;
         setProvision((current) => current?.attemptId === attemptId
           ? { ...current, status: 'failed', error: presentError(error) }
           : current);
       }
     };
-    timer = window.setTimeout(poll, provision.pollIntervalMs ?? 1_000);
+    scheduler.schedule(poll, provision.pollIntervalMs ?? 1_000);
     return () => {
+      scheduler.dispose();
       controller.abort();
-      window.clearTimeout(timer);
     };
   }, [announce, invoke, loadStatus, provision?.attemptId, provision?.status, provision?.pollIntervalMs]);
 

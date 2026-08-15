@@ -10,6 +10,7 @@ import {
   presentError,
   unwrapRpcResult,
 } from "./api.js";
+import { useAnimationFrameScheduler } from "../../lifecycle.js";
 import { installFeishuStyles } from "./styles.js";
 
 const h = React.createElement;
@@ -486,6 +487,33 @@ function PageError({ error, onRetry, busy }) {
 
 const EMPTY_TOTALS = Object.freeze({ configured: 0, connected: 0 });
 
+export function mergeFeishuSnapshotState(
+  current,
+  snapshot,
+  { restoreProvisioning = false, now = Date.now() } = {},
+) {
+  if (snapshot.revision > 0 && current.revision > snapshot.revision) return current;
+  let provisioning = current.provisioning;
+  if (!provisioning && restoreProvisioning && snapshot.provisioning) {
+    provisioning = {
+      phase: snapshot.state === "connecting" ? "connecting" : "qr",
+      ...snapshot.provisioning,
+      durationMs: Math.max(1, snapshot.provisioning.expiresAt - now),
+      expired: snapshot.provisioning.expiresAt <= now,
+    };
+  }
+  return {
+    ...current,
+    phase: "ready",
+    revision: snapshot.revision,
+    bots: snapshot.bots,
+    totals: snapshot.totals,
+    provisioning,
+    pageError: null,
+    statusError: null,
+  };
+}
+
 export function FeishuSettingsTab({ rpcCall }) {
   const [model, setModel] = React.useState({
     phase: "loading",
@@ -507,63 +535,50 @@ export function FeishuSettingsTab({ rpcCall }) {
   const cardRefs = React.useRef(new Map());
   const removeButtonRefs = React.useRef(new Map());
   const addButtonRef = React.useRef(null);
+  const scheduleAnimationFrame = useAnimationFrameScheduler();
 
   const announce = React.useCallback((message) => {
     setAnnouncement("");
-    if (!message) return;
-    window.requestAnimationFrame(() => setAnnouncement(message));
-  }, []);
+    scheduleAnimationFrame(() => {
+      if (message) setAnnouncement(message);
+    }, "announcement");
+  }, [scheduleAnimationFrame]);
 
   const invoke = React.useCallback(async (endpoint, payload = {}, signal) => {
     return unwrapRpcResult(await rpcCall(endpoint, payload, signal));
   }, [rpcCall]);
 
-  const mergeSnapshot = React.useCallback((snapshot, { restoreProvisioning = true } = {}) => {
-    setModel((current) => {
-      if (snapshot.revision > 0 && current.revision > snapshot.revision) return current;
-      let provisioning = current.provisioning;
-      if (!provisioning && restoreProvisioning && snapshot.provisioning) {
-        provisioning = {
-          phase: snapshot.state === "connecting" ? "connecting" : "qr",
-          ...snapshot.provisioning,
-          durationMs: Math.max(1, snapshot.provisioning.expiresAt - Date.now()),
-          expired: snapshot.provisioning.expiresAt <= Date.now(),
-        };
-      }
-      return {
-        ...current,
-        phase: "ready",
-        revision: snapshot.revision,
-        bots: snapshot.bots,
-        totals: snapshot.totals,
-        provisioning,
-        pageError: null,
-        statusError: null,
-      };
-    });
+  const mergeSnapshot = React.useCallback((snapshot, { restoreProvisioning = false } = {}) => {
+    const now = Date.now();
+    setModel((current) => mergeFeishuSnapshotState(
+      current,
+      snapshot,
+      { restoreProvisioning, now },
+    ));
   }, []);
 
-  const loadStatus = React.useCallback(async ({ signal, silent = false, restoreProvisioning = true } = {}) => {
+  const loadStatus = React.useCallback(async ({ signal, silent = false, restoreProvisioning = false } = {}) => {
     if (!silent) setPageBusy(true);
     try {
       const snapshot = normalizeBotsSnapshot(await invoke(FEISHU_ENDPOINTS.status, {}, signal));
+      if (signal?.aborted) return undefined;
       mergeSnapshot(snapshot, { restoreProvisioning });
       return snapshot;
     } catch (error) {
-      if (error?.name === "AbortError") return undefined;
+      if (signal?.aborted || error?.name === "AbortError") return undefined;
       const presented = presentError(error);
       setModel((current) => current.phase === "loading" || !silent
         ? { ...current, phase: "error", pageError: presented }
         : { ...current, statusError: presented });
       return undefined;
     } finally {
-      if (!silent) setPageBusy(false);
+      if (!silent && !signal?.aborted) setPageBusy(false);
     }
   }, [invoke, mergeSnapshot]);
 
   React.useEffect(() => {
     const controller = new AbortController();
-    void loadStatus({ signal: controller.signal });
+    void loadStatus({ signal: controller.signal, restoreProvisioning: true });
     return () => controller.abort();
   }, [loadStatus]);
 
@@ -576,7 +591,11 @@ export function FeishuSettingsTab({ rpcCall }) {
     const timer = window.setInterval(async () => {
       if (inFlight) return;
       inFlight = true;
-      await loadStatus({ signal: controller.signal, silent: true });
+      await loadStatus({
+        signal: controller.signal,
+        silent: true,
+        restoreProvisioning: false,
+      });
       inFlight = false;
     }, 15_000);
     return () => {
@@ -641,7 +660,7 @@ export function FeishuSettingsTab({ rpcCall }) {
       setModel((current) => ({ ...current, provisioning: null }));
       announce("已取消添加机器人。");
       await loadStatus({ silent: true, restoreProvisioning: false });
-      window.requestAnimationFrame(() => addButtonRef.current?.focus());
+      scheduleAnimationFrame(() => addButtonRef.current?.focus(), "focus");
     } catch (error) {
       setModel((current) => ({
         ...current,
@@ -650,16 +669,19 @@ export function FeishuSettingsTab({ rpcCall }) {
     } finally {
       setProvisionBusy(false);
     }
-  }, [announce, invoke, loadStatus, model.provisioning?.attemptId]);
+  }, [announce, invoke, loadStatus, model.provisioning?.attemptId, scheduleAnimationFrame]);
 
+  const countdownAttemptId = model.provisioning?.attemptId;
+  const countdownPhase = model.provisioning?.phase;
+  const countdownExpiresAt = model.provisioning?.expiresAt;
+  const countdownExpired = model.provisioning?.expired;
   React.useEffect(() => {
-    const provision = model.provisioning;
-    if (!provision || provision.phase !== "qr" || provision.expired) return undefined;
+    if (!countdownAttemptId || countdownPhase !== "qr" || countdownExpired) return undefined;
     const tick = () => {
       const timestamp = Date.now();
       setNow(timestamp);
-      if (timestamp >= provision.expiresAt) {
-        setModel((current) => current.provisioning?.attemptId === provision.attemptId
+      if (timestamp >= countdownExpiresAt) {
+        setModel((current) => current.provisioning?.attemptId === countdownAttemptId
           ? { ...current, provisioning: { ...current.provisioning, expired: true } }
           : current);
       }
@@ -667,7 +689,7 @@ export function FeishuSettingsTab({ rpcCall }) {
     tick();
     const timer = window.setInterval(tick, 1_000);
     return () => window.clearInterval(timer);
-  }, [model.provisioning]);
+  }, [countdownAttemptId, countdownPhase, countdownExpiresAt, countdownExpired]);
 
   React.useEffect(() => {
     const provision = model.provisioning;
@@ -797,8 +819,8 @@ export function FeishuSettingsTab({ rpcCall }) {
   const cancelRemove = React.useCallback(() => {
     const botId = removeTargetId;
     setRemoveTargetId(null);
-    window.requestAnimationFrame(() => removeButtonRefs.current.get(botId)?.focus());
-  }, [removeTargetId]);
+    scheduleAnimationFrame(() => removeButtonRefs.current.get(botId)?.focus(), "focus");
+  }, [removeTargetId, scheduleAnimationFrame]);
 
   const confirmRemove = React.useCallback(async (connection) => {
     const { botId, bot } = connection;
@@ -820,14 +842,14 @@ export function FeishuSettingsTab({ rpcCall }) {
       });
       announce(`${bot.name}已从此 DeepSeek Harness 移除；飞书开放平台中的应用未被删除。`);
       await loadStatus({ silent: true });
-      window.requestAnimationFrame(() => addButtonRef.current?.focus());
+      scheduleAnimationFrame(() => addButtonRef.current?.focus(), "focus");
     } catch (error) {
       setBotError(botId, error);
       announce(`${bot.name}移除失败，请重试。`);
     } finally {
       setBotBusy(botId, null);
     }
-  }, [announce, invoke, loadStatus, setBotBusy, setBotError]);
+  }, [announce, invoke, loadStatus, scheduleAnimationFrame, setBotBusy, setBotError]);
 
   const provision = model.provisioning;
   let provisionContent = null;

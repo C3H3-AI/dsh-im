@@ -14,7 +14,7 @@
 
 - 飞书：扫码创建并绑定机器人，使用长连接收发消息；
 - 微信：扫码绑定微信机器人，使用腾讯 iLink 长轮询收发消息；
-- 钉钉：扫码创建并授权机器人，使用钉钉 Stream 长连接收发消息。
+- 钉钉：扫码创建并授权机器人，使用钉钉 Stream 长连接收消息，并通过 AI Card 流式显示 Harness 回答。
 
 其他 IM 平台可继续按同一渠道适配器结构接入。
 
@@ -26,7 +26,7 @@ npx -y github:xmanrui/dsh-im install
 
 重启 `dsh web`，然后打开「设置 → 插件 → IM机器人」。安装器会用 `dsh-im` 替换 profile 中直接安装的 `dsh-feishu`、`dsh-weixin` 和 `dsh-dingtalk`，但不删除任何渠道数据；原有渠道凭据和扫码绑定会继续使用。
 
-钉钉接入时，请使用已加入企业/组织且有权创建机器人的钉钉账号扫描页面二维码，再在钉钉授权页点击「一键创建新机器人」。若提示“该账号还未加入组织”，请先创建组织或换用已加入组织的账号后重新扫码。钉钉当前可能在该官方授权页显示 OpenClaw 品牌；扫码后的机器人连接、凭据和消息均由 DeepSeek Harness 管理。由于扫码结果不包含扫码人的 staff ID，首次私聊后还需要在本机页面批准该使用者，未批准消息不会进入 Harness。
+钉钉接入时，请使用已加入企业/组织且有权创建机器人的钉钉账号扫描页面二维码，再在钉钉授权页点击「一键创建新机器人」。若提示“该账号还未加入组织”，请先创建组织或换用已加入组织的账号后重新扫码。钉钉当前可能在该官方授权页显示 OpenClaw 品牌；扫码后的机器人连接、凭据和消息均由 DeepSeek Harness 管理。插件不设置本机二次批准流程，钉钉中的机器人可见范围就是入站访问范围，请只开放给信任的组织、群或成员。
 
 ## 设计
 
@@ -61,7 +61,7 @@ Connect IM bots to DeepSeek Harness by scanning a QR code. One plugin and one se
 
 - Feishu: create and bind a bot by scanning a QR code, then send and receive messages over a persistent connection.
 - WeChat: bind a WeChat bot by scanning a QR code, then send and receive messages through Tencent iLink long polling.
-- DingTalk: create and authorize a bot by scanning a QR code, then send and receive messages through DingTalk Stream.
+- DingTalk: create and authorize a bot by scanning a QR code, receive messages through DingTalk Stream, and stream Harness replies through AI Cards.
 
 Other IM platforms can be added through the same channel-adapter structure.
 
@@ -73,7 +73,7 @@ npx -y github:xmanrui/dsh-im install
 
 Restart `dsh web`, then open **Settings → Plugins → IM Bot**. The installer replaces directly installed `dsh-feishu`, `dsh-weixin`, and `dsh-dingtalk` entries in the profile with `dsh-im` without deleting channel data.
 
-For DingTalk, scan with an account that belongs to an enterprise or organization and can create bots, then choose **Create a new bot** on the authorization page. If DingTalk reports that the account has not joined an organization, create one or switch to an account that has, then scan again. That DingTalk-hosted page may currently display OpenClaw branding; the resulting connection, credentials, and messages are managed by DeepSeek Harness. Because the scan result does not identify the scanning user, send the bot a direct message and approve that sender locally before the message can enter Harness.
+For DingTalk, scan with an account that belongs to an enterprise or organization and can create bots, then choose **Create a new bot** on the authorization page. If DingTalk reports that the account has not joined an organization, create one or switch to an account that has, then scan again. That DingTalk-hosted page may currently display OpenClaw branding; the resulting connection, credentials, and messages are managed by DeepSeek Harness. There is no second local sender-approval flow: the bot's DingTalk visibility is its inbound access scope, so restrict it to trusted organizations, groups, or members.
 
 ## Design
 

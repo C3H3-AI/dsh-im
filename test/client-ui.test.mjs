@@ -8,6 +8,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { IMSettingsTab } from '../plugin-src/client/index.js';
 
 const STYLES_URL = new URL('../plugin-src/client/styles.js', import.meta.url);
+const CLIENT_BUNDLE_URL = new URL('../lib/client.js', import.meta.url);
+const DINGTALK_CLIENT_SOURCE_URL = new URL(
+  import.meta.resolve('@xmanrui/dsh-dingtalk/client-source'),
+);
 
 test('IM settings renders three compact logo channel tabs without enable switches', () => {
   const markup = renderToStaticMarkup(React.createElement(IMSettingsTab, {
@@ -41,4 +45,20 @@ test('the DingTalk QR card stacks within the narrow combined-channel panel', asy
   assert.match(styles, /\.dim-panel \.ddt-qrFrame, \.dim-panel \.ddt-countdown \{ width: min\(270px, 100%\); \}/);
   assert.match(styles, /\.dim-panel \.ddt-qrColumn \{ width: 100%; min-width: 0; \}/);
   assert.match(styles, /\.dim-panel \.ddt-qrCopy \{ width: 100%; min-width: 0; overflow-wrap: anywhere; \}/);
+});
+
+test('the bundled DingTalk channel has no local sender approval workflow', async () => {
+  const [{ DINGTALK_ENDPOINTS }, source, bundle] = await Promise.all([
+    import('@xmanrui/dsh-dingtalk/client-api'),
+    readFile(DINGTALK_CLIENT_SOURCE_URL, 'utf8'),
+    readFile(CLIENT_BUNDLE_URL, 'utf8'),
+  ]);
+
+  assert.equal('approveSender' in DINGTALK_ENDPOINTS, false);
+  assert.equal('revokeSender' in DINGTALK_ENDPOINTS, false);
+  assert.doesNotMatch(source, /SenderAccess|onApprove|onRevoke|approveSender|revokeSender/);
+  assert.doesNotMatch(
+    bundle,
+    /bot\.sender\.approve|bot\.sender\.revoke|允许使用机器人的钉钉账号|批准使用/,
+  );
 });
