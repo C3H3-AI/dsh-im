@@ -26,7 +26,7 @@ npx -y github:xmanrui/dsh-im install
 
 重启 `dsh web`，然后打开「设置 → 插件 → IM机器人」。安装器会用 `dsh-im` 替换 profile 中直接安装的 `dsh-feishu`、`dsh-weixin` 和 `dsh-dingtalk`，但不删除任何渠道数据；原有渠道凭据和扫码绑定会继续使用。
 
-钉钉接入时，用钉钉 App 扫描页面二维码，再在钉钉授权页点击「一键创建新机器人」。钉钉当前可能在该官方授权页显示 OpenClaw 品牌；扫码后的机器人连接、凭据和消息均由 DeepSeek Harness 管理。由于扫码结果不包含扫码人的 staff ID，首次私聊后还需要在本机页面批准该使用者，未批准消息不会进入 Harness。
+钉钉接入时，请使用已加入企业/组织且有权创建机器人的钉钉账号扫描页面二维码，再在钉钉授权页点击「一键创建新机器人」。若提示“该账号还未加入组织”，请先创建组织或换用已加入组织的账号后重新扫码。钉钉当前可能在该官方授权页显示 OpenClaw 品牌；扫码后的机器人连接、凭据和消息均由 DeepSeek Harness 管理。由于扫码结果不包含扫码人的 staff ID，首次私聊后还需要在本机页面批准该使用者，未批准消息不会进入 Harness。
 
 ## 设计
 
@@ -73,7 +73,7 @@ npx -y github:xmanrui/dsh-im install
 
 Restart `dsh web`, then open **Settings → Plugins → IM Bot**. The installer replaces directly installed `dsh-feishu`, `dsh-weixin`, and `dsh-dingtalk` entries in the profile with `dsh-im` without deleting channel data.
 
-For DingTalk, scan the QR code with the DingTalk app and choose **Create a new bot** on the authorization page. That DingTalk-hosted page may currently display OpenClaw branding; the resulting connection, credentials, and messages are managed by DeepSeek Harness. Because the scan result does not identify the scanning user, send the bot a direct message and approve that sender locally before the message can enter Harness.
+For DingTalk, scan with an account that belongs to an enterprise or organization and can create bots, then choose **Create a new bot** on the authorization page. If DingTalk reports that the account has not joined an organization, create one or switch to an account that has, then scan again. That DingTalk-hosted page may currently display OpenClaw branding; the resulting connection, credentials, and messages are managed by DeepSeek Harness. Because the scan result does not identify the scanning user, send the bot a direct message and approve that sender locally before the message can enter Harness.
 
 ## Design
 

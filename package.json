@@ -57,7 +57,7 @@
     "node": ">=22.19"
   },
   "dependencies": {
-    "@xmanrui/dsh-dingtalk": "https://github.com/xmanrui/dsh-dingtalk/archive/6a8aaccf4b264bb8ccdc094bf9f058420714e0f4.tar.gz",
+    "@xmanrui/dsh-dingtalk": "https://github.com/xmanrui/dsh-dingtalk/archive/e21177c3ba845f42d8f72f68b63cce67fe1a1d55.tar.gz",
     "@xmanrui/dsh-feishu": "https://github.com/xmanrui/dsh-feishu/archive/aad650feabadd511241aa58b236d64273d5e397f.tar.gz",
     "@xmanrui/dsh-weixin": "https://github.com/xmanrui/dsh-weixin/archive/76d076771b2c84fb4c5598c2344d486695eda080.tar.gz"
   },
