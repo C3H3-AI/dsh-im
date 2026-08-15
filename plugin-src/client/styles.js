@@ -31,11 +31,13 @@ const CSS = String.raw`
 .dim-logoDingtalk svg { width: 24px; height: 24px; }
 .dim-logoQq { color: white; background: #1677ff; }
 .dim-logoQq svg { width: 21px; height: 21px; }
+.dim-logoWecom { background: white; border: 1px solid var(--dsw-alias-line-border, #e5e6eb); }
+.dim-logoWecom svg { width: 22px; height: 22px; }
 .dim-channelCopy { min-width: 0; display: block; }
 .dim-channelCopy strong { overflow: hidden; color: inherit; font-size: 14px; line-height: 20px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
 .dim-divider { width: 1px; min-height: 520px; background: var(--dsw-alias-line-divider, #eef0f3); }
 .dim-panel { min-width: 0; container-type: inline-size; }
-.dim-panel .bxf-page, .dim-panel .dxw-page, .dim-panel .ddt-page, .dim-panel .dqq-page { width: 100%; max-width: none; padding: 0 0 24px; }
+.dim-panel .bxf-page, .dim-panel .dxw-page, .dim-panel .ddt-page, .dim-panel .dqq-page, .dim-panel .dwecom-page { width: 100%; max-width: none; padding: 0 0 24px; }
 .dim-panel .bxf-heading, .dim-panel .dxw-heading, .dim-panel .ddt-heading { justify-content: flex-end; }
 .dim-panel .bxf-headingTools, .dim-panel .dxw-tools, .dim-panel .ddt-tools { width: 100%; justify-content: space-between; }
 .dim-panel .bxf-headingTools .dim-scanButton, .dim-panel .dxw-tools .dim-scanButton, .dim-panel .ddt-tools .dim-scanButton { flex: none; min-height: 34px; padding: 0 13px; border: 1px solid #1677ff; border-radius: 8px; color: #fff; background: #1677ff; box-shadow: none; font: inherit; font-size: 13px; font-weight: 560; white-space: nowrap; }

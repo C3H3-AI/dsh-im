@@ -1,6 +1,12 @@
 import * as React from 'react';
 
-import { DingtalkLogoGlyph, FeishuLogoGlyph, QqLogoGlyph, WeixinLogoGlyph } from './channel-logos.js';
+import {
+  DingtalkLogoGlyph,
+  FeishuLogoGlyph,
+  QqLogoGlyph,
+  WecomLogoGlyph,
+  WeixinLogoGlyph,
+} from './channel-logos.js';
 import { DINGTALK_RPC_CHANNEL } from './channels/dingtalk/api.js';
 import { DingtalkSettingsTab } from './channels/dingtalk/index.js';
 import { FeishuSettingsTab } from './channels/feishu/index.js';
@@ -9,6 +15,9 @@ import { installFeishuStyles } from './channels/feishu/styles.js';
 import { QQ_RPC_CHANNEL } from './channels/qq/api.js';
 import { QqSettingsTab } from './channels/qq/index.js';
 import { installQqStyles } from './channels/qq/styles.js';
+import { WECOM_RPC_CHANNEL } from './channels/wecom/api.js';
+import { WecomSettingsTab } from './channels/wecom/index.js';
+import { installWecomStyles } from './channels/wecom/styles.js';
 import { WeixinSettingsTab } from './channels/weixin/index.js';
 import { WEIXIN_RPC_CHANNEL } from './channels/weixin/api.js';
 import { installWeixinStyles } from './channels/weixin/styles.js';
@@ -23,6 +32,7 @@ const CHANNELS = Object.freeze([
   { id: 'weixin', label: '微信' },
   { id: 'feishu', label: '飞书' },
   { id: 'dingtalk', label: '钉钉' },
+  { id: 'wecom', label: '企业微信' },
   { id: 'qq', label: 'QQ' },
 ]);
 
@@ -45,14 +55,19 @@ function QqLogo() {
   return h('span', { className: 'dim-logo dim-logoQq', 'aria-hidden': 'true' }, h(QqLogoGlyph));
 }
 
+function WecomLogo() {
+  return h('span', { className: 'dim-logo dim-logoWecom', 'aria-hidden': 'true' }, h(WecomLogoGlyph));
+}
+
 function ChannelLogo({ channel }) {
   if (channel === 'weixin') return h(WeixinLogo);
   if (channel === 'feishu') return h(FeishuLogo);
   if (channel === 'dingtalk') return h(DingtalkLogo);
+  if (channel === 'wecom') return h(WecomLogo);
   return h(QqLogo);
 }
 
-export function IMSettingsTab({ dingtalkRpcCall, feishuRpcCall, qqRpcCall, weixinRpcCall }) {
+export function IMSettingsTab({ dingtalkRpcCall, feishuRpcCall, qqRpcCall, wecomRpcCall, weixinRpcCall }) {
   const [selected, setSelected] = React.useState('weixin');
   const active = CHANNELS.find((channel) => channel.id === selected) ?? CHANNELS[0];
   return h('section', { className: 'dim-page', 'aria-label': 'IM机器人设置' },
@@ -87,14 +102,22 @@ export function IMSettingsTab({ dingtalkRpcCall, feishuRpcCall, qqRpcCall, weixi
           ? h(FeishuSettingsTab, { rpcCall: feishuRpcCall })
           : active.id === 'dingtalk'
             ? h(DingtalkSettingsTab, { rpcCall: dingtalkRpcCall })
-            : h(QqSettingsTab, { rpcCall: qqRpcCall })),
+            : active.id === 'wecom'
+              ? h(WecomSettingsTab, { rpcCall: wecomRpcCall })
+              : h(QqSettingsTab, { rpcCall: qqRpcCall })),
     ),
   );
 }
 
 export function apply(ctx) {
   ctx.effect(() => {
-    const disposers = [installFeishuStyles(), installWeixinStyles(), installQqStyles(), installImStyles()];
+    const disposers = [
+      installFeishuStyles(),
+      installWeixinStyles(),
+      installWecomStyles(),
+      installQqStyles(),
+      installImStyles(),
+    ];
     return () => {
       for (const dispose of disposers.reverse()) dispose();
     };
@@ -108,12 +131,14 @@ export function apply(ctx) {
     ctx.connection.rpc.call(DINGTALK_RPC_CHANNEL, endpoint, payload, signal);
   const qqRpcCall = (endpoint, payload, signal) =>
     ctx.connection.rpc.call(QQ_RPC_CHANNEL, endpoint, payload, signal);
+  const wecomRpcCall = (endpoint, payload, signal) =>
+    ctx.connection.rpc.call(WECOM_RPC_CHANNEL, endpoint, payload, signal);
 
   ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
     name: 'settings.plugins.tab',
     id: 'im',
     order: 20,
     label: 'IM机器人',
-    inject: () => ({ dingtalkRpcCall, feishuRpcCall, qqRpcCall, weixinRpcCall }),
+    inject: () => ({ dingtalkRpcCall, feishuRpcCall, qqRpcCall, wecomRpcCall, weixinRpcCall }),
   }, IMSettingsTab));
 }

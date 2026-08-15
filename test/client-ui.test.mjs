@@ -19,6 +19,10 @@ import {
   AccountCard as WeixinAccountCard,
   WeixinSettingsTab,
 } from '../plugin-src/client/channels/weixin/index.js';
+import {
+  AccountCard as WecomAccountCard,
+  WecomSettingsTab,
+} from '../plugin-src/client/channels/wecom/index.js';
 
 const STYLES_URL = new URL('../plugin-src/client/styles.js', import.meta.url);
 const FEISHU_STYLES_URL = new URL(
@@ -31,6 +35,10 @@ const WEIXIN_STYLES_URL = new URL(
 );
 const DINGTALK_STYLES_URL = new URL(
   '../plugin-src/client/channels/dingtalk/styles.js',
+  import.meta.url,
+);
+const WECOM_STYLES_URL = new URL(
+  '../plugin-src/client/channels/wecom/styles.js',
   import.meta.url,
 );
 const FEISHU_SOURCE_URL = new URL(
@@ -46,12 +54,17 @@ const DINGTALK_CLIENT_SOURCE_URL = new URL(
   '../plugin-src/client/channels/dingtalk/index.js',
   import.meta.url,
 );
+const WECOM_SOURCE_URL = new URL(
+  '../plugin-src/client/channels/wecom/index.js',
+  import.meta.url,
+);
 
-test('IM settings renders four compact logo channel tabs without enable switches', () => {
+test('IM settings renders five compact logo channel tabs without enable switches', () => {
   const markup = renderToStaticMarkup(React.createElement(IMSettingsTab, {
     feishuRpcCall: async () => ({ ok: true, value: {} }),
     weixinRpcCall: async () => ({ ok: true, value: {} }),
     dingtalkRpcCall: async () => ({ ok: true, value: {} }),
+    wecomRpcCall: async () => ({ ok: true, value: {} }),
     qqRpcCall: async () => ({ ok: true, value: {} }),
   }));
 
@@ -61,12 +74,14 @@ test('IM settings renders four compact logo channel tabs without enable switches
   assert.match(markup, />微信</);
   assert.match(markup, />飞书</);
   assert.match(markup, />钉钉</);
+  assert.match(markup, />企业微信</);
   assert.match(markup, />QQ</);
   assert.match(markup, /dim-logoWeixin/);
   assert.match(markup, /dim-logoFeishu/);
   assert.match(markup, /dim-logoDingtalk/);
+  assert.match(markup, /dim-logoWecom/);
   assert.match(markup, /dim-logoQq/);
-  assert.equal((markup.match(/role="tab"/g) ?? []).length, 4);
+  assert.equal((markup.match(/role="tab"/g) ?? []).length, 5);
   assert.equal((markup.match(/aria-selected="true"/g) ?? []).length, 1);
   assert.doesNotMatch(markup, /role="switch"|type="checkbox"/);
   assert.doesNotMatch(markup, /dim-chevron|扫码绑定<\/small>|扫码接入<\/small>/);
@@ -138,20 +153,23 @@ test('Feishu keeps its heading controls on one row without a plus icon', async (
 });
 
 test('scan actions align left while online totals align right in every channel', async () => {
-  const [imStyles, feishuStyles, weixinStyles, dingtalkStyles, feishuSource, weixinSource, dingtalkSource] = await Promise.all([
+  const [imStyles, feishuStyles, weixinStyles, dingtalkStyles, wecomStyles, feishuSource, weixinSource, dingtalkSource, wecomSource] = await Promise.all([
     readFile(STYLES_URL, 'utf8'),
     readFile(FEISHU_STYLES_URL, 'utf8'),
     readFile(WEIXIN_STYLES_URL, 'utf8'),
     readFile(DINGTALK_STYLES_URL, 'utf8'),
+    readFile(WECOM_STYLES_URL, 'utf8'),
     readFile(FEISHU_SOURCE_URL, 'utf8'),
     readFile(WEIXIN_SOURCE_URL, 'utf8'),
     readFile(DINGTALK_CLIENT_SOURCE_URL, 'utf8'),
+    readFile(WECOM_SOURCE_URL, 'utf8'),
   ]);
 
   assert.match(imStyles, /\.dim-panel \.bxf-headingTools, \.dim-panel \.dxw-tools, \.dim-panel \.ddt-tools \{[^}]*justify-content: space-between;/);
   assert.match(feishuStyles, /\.bxf-headingTools \{[^}]*justify-content: space-between;/);
   assert.match(weixinStyles, /\.dxw-tools \{[^}]*justify-content: space-between;/);
   assert.match(dingtalkStyles, /\.ddt-tools \{[^}]*justify-content: space-between;/);
+  assert.match(wecomStyles, /\.dwecom-page/);
 
   const headingSource = (source) => source.slice(
     source.indexOf('function Heading'),
@@ -160,11 +178,13 @@ test('scan actions align left while online totals align right in every channel',
   const feishuHeading = headingSource(feishuSource);
   const weixinHeading = headingSource(weixinSource);
   const dingtalkHeading = headingSource(dingtalkSource);
+  const wecomHeading = headingSource(wecomSource);
   assert.ok(feishuHeading.indexOf('扫码绑定机器人') < feishuHeading.indexOf('bxf-totalBadge'));
   assert.ok(weixinHeading.indexOf('扫码绑定微信') < weixinHeading.indexOf('dxw-badge'));
   assert.ok(dingtalkHeading.indexOf('扫码接入钉钉') < dingtalkHeading.indexOf('ddt-badge'));
+  assert.ok(wecomHeading.indexOf('扫码绑定企业微信机器人') < wecomHeading.indexOf('ddt-badge'));
 
-  for (const heading of [feishuHeading, weixinHeading, dingtalkHeading]) {
+  for (const heading of [feishuHeading, weixinHeading, dingtalkHeading, wecomHeading]) {
     assert.match(heading, /dim-scanButton/);
     assert.match(heading, /dim-onlineBadge/);
   }
@@ -175,7 +195,7 @@ test('scan actions align left while online totals align right in every channel',
 });
 
 test('channel headings omit the redundant local credential badge', () => {
-  const components = [FeishuSettingsTab, WeixinSettingsTab, DingtalkSettingsTab];
+  const components = [FeishuSettingsTab, WeixinSettingsTab, DingtalkSettingsTab, WecomSettingsTab];
 
   for (const Component of components) {
     const markup = renderToStaticMarkup(React.createElement(Component, {
@@ -186,14 +206,15 @@ test('channel headings omit the redundant local credential badge', () => {
 });
 
 test('all channel settings states use the DingTalk page treatment', async () => {
-  const [styles, feishuSource, weixinSource, dingtalkSource] = await Promise.all([
+  const [styles, feishuSource, weixinSource, dingtalkSource, wecomSource] = await Promise.all([
     readFile(STYLES_URL, 'utf8'),
     readFile(FEISHU_SOURCE_URL, 'utf8'),
     readFile(WEIXIN_SOURCE_URL, 'utf8'),
     readFile(DINGTALK_CLIENT_SOURCE_URL, 'utf8'),
+    readFile(WECOM_SOURCE_URL, 'utf8'),
   ]);
 
-  for (const Component of [FeishuSettingsTab, WeixinSettingsTab, DingtalkSettingsTab]) {
+  for (const Component of [FeishuSettingsTab, WeixinSettingsTab, DingtalkSettingsTab, WecomSettingsTab]) {
     const markup = renderToStaticMarkup(React.createElement(Component, {
       rpcCall: async () => ({ ok: true, value: {} }),
     }));
@@ -202,7 +223,7 @@ test('all channel settings states use the DingTalk page treatment', async () => 
     assert.match(markup, /dim-spinner/);
   }
 
-  for (const source of [feishuSource, weixinSource, dingtalkSource]) {
+  for (const source of [feishuSource, weixinSource, dingtalkSource, wecomSource]) {
     for (const className of [
       'dim-channelPage',
       'dim-surfaceCard',
@@ -232,6 +253,7 @@ test('bot cards reuse the same channel brand logos as the channel rail', () => {
     feishuRpcCall: async () => ({ ok: true, value: {} }),
     weixinRpcCall: async () => ({ ok: true, value: {} }),
     dingtalkRpcCall: async () => ({ ok: true, value: {} }),
+    wecomRpcCall: async () => ({ ok: true, value: {} }),
   }));
   const accountMarkup = renderToStaticMarkup(React.createElement(WeixinAccountCard, {
     account: {
@@ -250,6 +272,7 @@ test('bot cards reuse the same channel brand logos as the channel rail', () => {
 
   assert.match(railMarkup, /data-im-channel-logo="weixin"/);
   assert.match(railMarkup, /data-im-channel-logo="feishu"/);
+  assert.match(railMarkup, /data-im-channel-logo="wecom"/);
   assert.match(accountMarkup, /class="dxw-card dim-botCard"/);
   assert.match(accountMarkup, /class="dxw-avatar dim-botAvatar"[^]*data-im-channel-logo="weixin"/);
   assert.match(accountMarkup, /class="dxw-health dim-botHealth"/);
@@ -257,6 +280,20 @@ test('bot cards reuse the same channel brand logos as the channel rail', () => {
   assert.equal((accountMarkup.match(/dim-cardAction(?: |")/g) ?? []).length, 2);
   assert.equal((accountMarkup.match(/class="dxw-metric dim-botMetric"/g) ?? []).length, 2);
   assert.doesNotMatch(accountMarkup, /收到 \/ 回复/);
+});
+
+test('Enterprise WeChat cards reuse the rail logo and compact action treatment', () => {
+  const markup = renderToStaticMarkup(React.createElement(WecomAccountCard, {
+    account: {
+      botId: 'wecom-card', state: 'connected', connected: true,
+      bot: { name: '企业微信机器人', appIdMasked: 'bot••••001' },
+      health: { summary: '企业微信 WebSocket 长连接运行正常', lastCheckedAt: Date.now() },
+    },
+    onReconnect() {}, onRequestRemove() {}, onConfirmRemove() {}, onCancelRemove() {},
+  }));
+  assert.match(markup, /data-im-channel-logo="wecom"/);
+  assert.equal((markup.match(/dim-cardAction(?: |")/g) ?? []).length, 2);
+  assert.equal((markup.match(/class="ddt-metric dim-botMetric"/g) ?? []).length, 2);
 });
 
 test('DingTalk bot cards omit the redundant received and replied metric', () => {
