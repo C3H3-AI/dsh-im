@@ -56,11 +56,12 @@ const CSS = String.raw`
 }
 
 .bxf-headingTools {
+  width: 100%;
   flex: none;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
 }
 
@@ -246,6 +247,7 @@ const CSS = String.raw`
 
 .bxf-button[data-kind="danger"] { color: var(--bxf-error); }
 .bxf-button[data-size="small"] { min-height: 32px; padding: 5px 10px; font-size: 12px; }
+.bxf-bindButton { flex: none; white-space: nowrap; }
 
 .bxf-provisionCard {
   border-color: color-mix(in srgb, var(--bxf-accent) 32%, var(--dsw-alias-border-l2, #dee0e3));
@@ -408,17 +410,16 @@ const CSS = String.raw`
 
 .bxf-connectedTop { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .bxf-botIdentity { min-width: 0; display: flex; align-items: center; gap: 13px; }
-.bxf-avatar { flex: none; width: 48px; height: 48px; display: grid; place-items: center; overflow: hidden; border-radius: 14px; color: var(--bxf-accent); background: color-mix(in srgb, var(--bxf-accent) 9%, var(--dsw-alias-bg-layer-1, #fff)); }
-.bxf-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.bxf-avatar { flex: none; width: 48px; height: 48px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--dsw-alias-line-border, #e5e6eb); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 3px rgb(31 35 41 / 7%); }
 .bxf-botName { min-width: 0; }
 .bxf-botName h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; line-height: 24px; font-weight: 650; }
-.bxf-botName p { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 12px; line-height: 18px; margin-top: 2px; }
+.bxf-botName p { overflow: hidden; color: var(--dsw-alias-label-tertiary, #8f959e); font-family: var(--ds-font-family-code, monospace); font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
 
 .bxf-healthPill { flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 28px; border-radius: 999px; padding: 4px 10px; color: var(--bxf-success); background: color-mix(in srgb, var(--bxf-success) 10%, transparent); font-size: 12px; font-weight: 600; line-height: 18px; }
 .bxf-healthPill[data-health="degraded"], .bxf-healthPill[data-health="checking"], .bxf-healthPill[data-health="connecting"] { color: var(--bxf-warning); background: color-mix(in srgb, var(--bxf-warning) 10%, transparent); }
 .bxf-healthPill[data-health="offline"], .bxf-healthPill[data-health="error"] { color: var(--bxf-error); background: color-mix(in srgb, var(--bxf-error) 10%, transparent); }
 
-.bxf-statusGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 22px; }
+.bxf-statusGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 22px; }
 .bxf-metric { min-width: 0; border: 1px solid var(--dsw-alias-border-l2, #dee0e3); border-radius: 9px; padding: 12px 13px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
 .bxf-metric dt { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; line-height: 17px; }
 .bxf-metric dd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary, #1f2329); font-size: 12px; line-height: 18px; font-weight: 550; margin: 3px 0 0; }
@@ -476,15 +477,13 @@ const CSS = String.raw`
 @keyframes bxf-shimmer { to { background-position: -220% 0; } }
 
 @container (max-width: 620px) {
-  .bxf-heading { flex-direction: column; gap: 10px; }
-  .bxf-headingTools { width: 100%; justify-content: flex-start; }
-  .bxf-headingTools .bxf-button { margin-left: auto; }
+  .bxf-headingTools { gap: 6px; }
+  .bxf-headingTools .bxf-totalBadge, .bxf-headingTools .bxf-localBadge { padding-inline: 8px; }
+  .bxf-headingTools .bxf-localBadge { gap: 4px; }
+  .bxf-headingTools .bxf-bindButton { padding-inline: 10px; }
 }
 
 @media (max-width: 680px) {
-  .bxf-heading { flex-direction: column; gap: 10px; }
-  .bxf-headingTools { width: 100%; justify-content: flex-start; }
-  .bxf-headingTools .bxf-button { margin-left: auto; }
   .bxf-intro { grid-template-columns: minmax(0, 1fr); }
   .bxf-markStage { display: none; }
   .bxf-qrLayout { grid-template-columns: minmax(0, 1fr); justify-items: center; }

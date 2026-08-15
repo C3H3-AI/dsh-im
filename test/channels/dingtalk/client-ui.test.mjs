@@ -22,7 +22,7 @@ test('QR guidance describes the complete official DingTalk authorization flow', 
   assert.match(source, /如果钉钉提示尚未加入组织/);
   assert.match(source, /在授权页点击“一键创建新机器人”/);
   assert.match(source, /保持本页打开，等待机器人自动连接/);
-  assert.match(source, /官方授权页目前可能显示 OpenClaw 品牌/);
+  assert.doesNotMatch(source, /OpenClaw 品牌|ddt-brandNotice/);
   assert.match(source, /safeQrSource\(provision\.qrCodeDataUrl\)/);
   assert.doesNotMatch(source, /verificationUrl|打开备用链接/);
   assert.doesNotMatch(source, /dangerouslySetInnerHTML|window\.open\(/);
@@ -63,11 +63,11 @@ test('the QR card responds to its plugin panel width instead of the browser view
   assert.match(styles, /\.ddt-qrCopy \{ min-width: 0; overflow-wrap: anywhere; \}/);
 });
 
-test('bot metrics stay in one compact three-column row at narrow widths', async () => {
+test('bot metrics stay in one compact two-column row at narrow widths', async () => {
   const styles = await readFile(STYLES_URL, 'utf8');
   assert.match(
     styles,
-    /\.ddt-metrics \{[^\n]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/,
+    /\.ddt-metrics \{[^\n]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/,
   );
   assert.doesNotMatch(
     styles,

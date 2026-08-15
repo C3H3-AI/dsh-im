@@ -1,5 +1,6 @@
 import * as React from "react";
 
+import { FeishuLogoGlyph } from "../../channel-logos.js";
 import {
   FEISHU_ENDPOINTS,
   FEISHU_RPC_CHANNEL,
@@ -70,13 +71,6 @@ function SparkIcon({ size = 18 }) {
   );
 }
 
-function PlusIcon({ size = 17 }) {
-  return h(SvgIcon, { size }, h("path", {
-    d: "M12 5v14M5 12h14", stroke: "currentColor", strokeWidth: "1.8",
-    strokeLinecap: "round",
-  }));
-}
-
 function RefreshIcon({ size = 16 }) {
   return h(SvgIcon, { size }, h("path", {
     d: "M19 7.5V4m0 0h-3.5M19 4l-2.1 2.1A7 7 0 1 0 19 13",
@@ -127,9 +121,8 @@ const Button = React.forwardRef(function Button(
   }, icon, h("span", null, children));
 });
 
-function BrandMark({ compact = false }) {
-  return h("div", { className: compact ? "bxf-avatar" : "bxf-brandMark" },
-    h(RobotIcon, { size: compact ? 25 : 34 }));
+function BrandMark() {
+  return h("div", { className: "bxf-brandMark" }, h(RobotIcon, { size: 34 }));
 }
 
 function Heading({ totals, onAdd, adding, busy, addButtonRef }) {
@@ -149,12 +142,12 @@ function Heading({ totals, onAdd, adding, busy, addButtonRef }) {
       h(Button, {
         kind: "primary",
         size: "small",
-        icon: h(PlusIcon),
+        className: "bxf-bindButton",
         onClick: onAdd,
         disabled: adding || busy,
         ref: addButtonRef,
         "aria-busy": busy ? "true" : undefined,
-      }, adding ? "正在添加" : "添加机器人"),
+      }, adding ? "正在绑定" : "扫码绑定机器人"),
     ),
   );
 }
@@ -363,7 +356,7 @@ function RemoveConfirmation({ bot, busy, onConfirm, onCancel }) {
   );
 }
 
-function BotCard({
+export function BotCard({
   connection,
   busy,
   actionError,
@@ -388,8 +381,6 @@ function BotCard({
     ?? connection.error?.message
     ?? health.summary;
   const titleId = `bxf-bot-${connection.botId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-  const domainLabel = bot.domain === "lark" ? "Lark" : "飞书";
-
   return h("article", {
     className: "bxf-card bxf-botCard",
     "aria-labelledby": titleId,
@@ -400,12 +391,11 @@ function BotCard({
     h("div", { className: "bxf-cardBody" },
       h("div", { className: "bxf-connectedTop" },
         h("div", { className: "bxf-botIdentity" },
-          bot.avatarUrl
-            ? h("div", { className: "bxf-avatar" }, h("img", { src: bot.avatarUrl, alt: "" }))
-            : h(BrandMark, { compact: true }),
+          h("div", { className: "bxf-avatar", "aria-hidden": "true" },
+            h(FeishuLogoGlyph, { size: 34 })),
           h("div", { className: "bxf-botName" },
             h("h3", { id: titleId, title: bot.name }, bot.name),
-            h("p", null, bot.tenantName ? `${bot.tenantName} · ${domainLabel}机器人` : `${domainLabel}机器人`)),
+            h("p", { title: bot.appIdMasked }, bot.appIdMasked ?? "应用标识已安全保存")),
         ),
         h("div", { className: "bxf-healthPill", "data-health": stateForDisplay },
           h("span", { className: "bxf-dot", "data-tone": tone }),
@@ -414,8 +404,6 @@ function BotCard({
       h("dl", { className: "bxf-statusGrid" },
         h("div", { className: "bxf-metric" }, h("dt", null, "消息通道"),
           h("dd", null, connected ? "长连接" : stateForDisplay === "connecting" ? "连接中" : "已断开")),
-        h("div", { className: "bxf-metric" }, h("dt", null, "应用标识"),
-          h("dd", { title: bot.appIdMasked }, bot.appIdMasked ?? "已安全保存")),
         h("div", { className: "bxf-metric" }, h("dt", null, "最近检查"),
           h("dd", null, formatCheckedTime(health.lastCheckedAt))),
       ),

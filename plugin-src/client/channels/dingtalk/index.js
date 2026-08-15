@@ -131,8 +131,6 @@ function QrPanel({ provision, now, busy, onRefresh, onCancel }) {
           h('li', null, '使用已加入企业/组织的钉钉账号扫描左侧二维码'),
           h('li', null, '在授权页点击“一键创建新机器人”'),
           h('li', null, '保持本页打开，等待机器人自动连接')),
-        h('div', { className: 'ddt-brandNotice' },
-          '钉钉官方授权页目前可能显示 OpenClaw 品牌，这是官方连接器授权页面，不影响机器人接入 DeepSeek Harness。'),
         h('div', { className: 'ddt-actions' },
           expired
             ? h(Button, { kind: 'primary', onClick: onRefresh, disabled: busy }, '重新生成二维码')
@@ -201,7 +199,7 @@ function RemoveConfirmation({ account, busy, onConfirm, onCancel }) {
       busy ? '正在移除…' : '确认移除接入')));
 }
 
-function AccountCard({
+export function AccountCard({
   account,
   busy,
   removing,
@@ -226,8 +224,6 @@ function AccountCard({
       h('dl', { className: 'ddt-metrics' },
         h('div', { className: 'ddt-metric' }, h('dt', null, '消息通道'),
           h('dd', null, account.connected ? 'Stream 长连接' : '离线')),
-        h('div', { className: 'ddt-metric' }, h('dt', null, '收到 / 回复'),
-          h('dd', null, `${account.stats.messagesReceived} / ${account.stats.messagesReplied}`)),
         h('div', { className: 'ddt-metric' }, h('dt', null, '最近检查'),
           h('dd', null, checkedTime(account.health.lastCheckedAt)))),
       h('div', { className: 'ddt-accountFooter' },

@@ -68,7 +68,6 @@ const CSS = String.raw`
 .ddt-steps { margin: 18px 0 16px; padding: 0; list-style: none; counter-reset: ddt-step; }
 .ddt-steps li { position: relative; min-height: 28px; padding: 3px 0 3px 36px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 13px; line-height: 22px; counter-increment: ddt-step; }
 .ddt-steps li::before { content: counter(ddt-step); position: absolute; left: 0; top: 1px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; color: var(--ddt-accent-deep); background: var(--ddt-accent-wash); font-size: 12px; font-weight: 700; }
-.ddt-brandNotice { margin: 0 0 18px; padding: 10px 12px; border-left: 3px solid #91caff; border-radius: 0 8px 8px 0; color: var(--dsw-alias-label-secondary, #646a73); background: #f5f9ff; font-size: 12px; line-height: 1.55; }
 .ddt-loading { padding: 38px; color: var(--dsw-alias-label-secondary, #646a73); text-align: center; }
 .ddt-loading h3 { margin: 0 0 7px; color: var(--dsw-alias-label-primary, #1f2329); font-size: 17px; }
 .ddt-loading p { line-height: 1.6; }
@@ -88,7 +87,7 @@ const CSS = String.raw`
 .ddt-accountIdentity h3 { overflow: hidden; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .ddt-accountIdentity p { margin-top: 4px; color: var(--dsw-alias-label-secondary, #646a73); font: 12px ui-monospace, SFMono-Regular, monospace; }
 .ddt-health { display: inline-flex; align-items: center; gap: 7px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; white-space: nowrap; }
-.ddt-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 20px 0; }
+.ddt-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 20px 0; }
 .ddt-metric { min-width: 0; padding: 12px; border-radius: 9px; background: var(--dsw-alias-fill-tertiary, #f7f8fa); }
 .ddt-metric dt { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; }
 .ddt-metric dd { overflow: hidden; margin: 5px 0 0; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }

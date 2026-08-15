@@ -11,9 +11,8 @@ const CSS = String.raw`
   box-sizing: border-box;
 }
 .dim-page *, .dim-page *::before, .dim-page *::after { box-sizing: border-box; }
-.dim-title { display: flex; align-items: center; justify-content: space-between; gap: 22px; margin: 0 0 26px; }
+.dim-title { margin: 0 0 26px; }
 .dim-title p { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 13px; line-height: 20px; white-space: nowrap; }
-.dim-channelCount { flex: none; padding: 6px 11px; border-radius: 999px; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-fill-secondary, #f2f3f5); font-size: 11px; white-space: nowrap; }
 .dim-layout { display: grid; grid-template-columns: 174px 1px minmax(0, 1fr); gap: 24px; align-items: start; }
 .dim-rail { max-height: 520px; display: grid; align-content: start; gap: 8px; overflow-y: auto; padding: 1px 4px 1px 1px; scrollbar-width: thin; scrollbar-color: var(--dsw-alias-line-border, #dfe1e5) transparent; }
 .dim-rail::-webkit-scrollbar { width: 4px; }

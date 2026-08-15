@@ -1,5 +1,6 @@
 import * as React from 'react';
 
+import { WeixinLogoGlyph } from '../../channel-logos.js';
 import {
   WEIXIN_ENDPOINTS,
   WEIXIN_RPC_CHANNEL,
@@ -18,29 +19,6 @@ const h = React.createElement;
 
 export const name = 'weixin-settings';
 export const inject = ['slots', 'connection'];
-
-function WeixinIcon({ size = 26 }) {
-  return h('svg', {
-    width: size,
-    height: size,
-    viewBox: '0 0 24 24',
-    fill: 'none',
-    xmlns: 'http://www.w3.org/2000/svg',
-    'aria-hidden': 'true',
-  },
-  h('path', {
-    d: 'M9.7 4.2c-4.15 0-7.5 2.72-7.5 6.08 0 1.91 1.08 3.61 2.78 4.72l-.7 2.35 2.75-1.37c.84.25 1.73.38 2.67.38 4.14 0 7.5-2.72 7.5-6.08S13.84 4.2 9.7 4.2Z',
-    fill: 'currentColor', opacity: '.96',
-  }),
-  h('path', {
-    d: 'M14.4 8.2c4.08 0 7.4 2.66 7.4 5.95 0 1.78-.97 3.38-2.5 4.47l.58 2-2.36-1.18c-.97.43-2.03.65-3.12.65-4.09 0-7.4-2.66-7.4-5.94 0-3.29 3.31-5.95 7.4-5.95Z',
-    fill: 'currentColor', stroke: 'white', strokeWidth: '.8',
-  }),
-  h('circle', { cx: '7.25', cy: '9.5', r: '1', fill: 'white' }),
-  h('circle', { cx: '11.55', cy: '9.5', r: '1', fill: 'white' }),
-  h('circle', { cx: '12.1', cy: '13.2', r: '.9', fill: 'white' }),
-  h('circle', { cx: '16.3', cy: '13.2', r: '.9', fill: 'white' }));
-}
 
 const Button = React.forwardRef(function Button(
   { children, kind = 'secondary', className = '', ...props },
@@ -93,7 +71,7 @@ function EmptyView({ onStart, busy }) {
           h(Button, { kind: 'primary', onClick: onStart, disabled: busy },
             busy ? '正在生成二维码…' : '生成微信二维码')),
       ),
-      h('div', { className: 'dxw-logo', 'aria-hidden': 'true' }, h(WeixinIcon, { size: 64 })),
+      h('div', { className: 'dxw-logo', 'aria-hidden': 'true' }, h(WeixinLogoGlyph, { size: 64 })),
     ));
 }
 
@@ -216,14 +194,14 @@ function checkedTime(timestamp) {
   }
 }
 
-function AccountCard({ account, busy, removing, onReconnect, onRequestRemove, onConfirmRemove, onCancelRemove }) {
+export function AccountCard({ account, busy, removing, onReconnect, onRequestRemove, onConfirmRemove, onCancelRemove }) {
   const state = busy === 'reconnect' ? 'connecting' : account.state;
   const tone = account.connected ? 'success' : state === 'error' ? 'error' : 'warning';
   return h('article', { className: 'dxw-card', tabIndex: -1, 'data-bot-id': account.botId },
     h('div', { className: 'dxw-cardBody' },
       h('div', { className: 'dxw-accountTop' },
         h('div', { className: 'dxw-accountIdentity' },
-          h('div', { className: 'dxw-avatar', 'aria-hidden': 'true' }, h(WeixinIcon, { size: 27 })),
+          h('div', { className: 'dxw-avatar', 'aria-hidden': 'true' }, h(WeixinLogoGlyph, { size: 27 })),
           h('div', null, h('h3', null, account.bot.name), h('p', null, account.bot.accountIdMasked))),
         h('div', { className: 'dxw-health' },
           h('span', { className: 'dxw-dot', 'data-tone': tone }),
@@ -231,8 +209,6 @@ function AccountCard({ account, busy, removing, onReconnect, onRequestRemove, on
       h('dl', { className: 'dxw-metrics' },
         h('div', { className: 'dxw-metric' }, h('dt', null, '消息通道'),
           h('dd', null, account.connected ? 'iLink 长轮询' : '离线')),
-        h('div', { className: 'dxw-metric' }, h('dt', null, '收到 / 回复'),
-          h('dd', null, `${account.stats.messagesReceived} / ${account.stats.messagesReplied}`)),
         h('div', { className: 'dxw-metric' }, h('dt', null, '最近检查'),
           h('dd', null, checkedTime(account.health.lastCheckedAt)))),
       h('div', { className: 'dxw-accountFooter' },
