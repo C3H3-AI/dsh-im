@@ -33,6 +33,10 @@ if ((client.match(/ctx\.slots\.inject\("settings\.plugins\.tab"/g) ?? []).length
 if (/role:\s*["']switch|type:\s*["']checkbox/.test(client)) {
   throw new Error('client bundle contains a channel enable switch');
 }
+if (!client.includes('container-type: inline-size')
+  || !client.includes('@container (max-width: 680px)')) {
+  throw new Error('client bundle does not contain the narrow-panel DingTalk QR layout');
+}
 if (!host.includes('@xmanrui/dsh-feishu')
   || !host.includes('@xmanrui/dsh-weixin')
   || !host.includes('@xmanrui/dsh-dingtalk')) {

@@ -33,11 +33,17 @@ const CSS = String.raw`
 .dim-channelCopy { min-width: 0; display: block; }
 .dim-channelCopy strong { overflow: hidden; color: inherit; font-size: 14px; line-height: 20px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
 .dim-divider { width: 1px; min-height: 520px; background: var(--dsw-alias-line-divider, #eef0f3); }
-.dim-panel { min-width: 0; }
+.dim-panel { min-width: 0; container-type: inline-size; }
 .dim-panel .bxf-page, .dim-panel .dxw-page, .dim-panel .ddt-page { width: 100%; max-width: none; padding: 0 0 24px; }
 .dim-panel .bxf-heading, .dim-panel .dxw-heading, .dim-panel .ddt-heading { justify-content: flex-end; }
 .dim-panel .bxf-headingTools, .dim-panel .dxw-tools, .dim-panel .ddt-tools { width: 100%; justify-content: flex-end; }
 .dim-panel .ddt-headingCopy { display: none; }
+.dim-panel .ddt-qrFrame, .dim-panel .ddt-countdown { width: min(270px, 100%); }
+@container (max-width: 680px) {
+  .dim-panel .ddt-qrLayout { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 24px; }
+  .dim-panel .ddt-qrColumn { width: 100%; min-width: 0; }
+  .dim-panel .ddt-qrCopy { width: 100%; min-width: 0; overflow-wrap: anywhere; }
+}
 @media (max-width: 840px) {
   .dim-title { align-items: flex-start; }
   .dim-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; }
