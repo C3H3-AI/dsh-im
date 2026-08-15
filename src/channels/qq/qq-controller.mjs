@@ -172,6 +172,48 @@ export class QqController {
     return publicAttempt(this.#attempts.get(attemptId));
   }
 
+  async bindCredentials({ appId, appSecret } = {}) {
+    if (this.#closed) throw new Error('QQ controller is closed');
+    const normalizedAppId = cleanString(appId);
+    const normalizedSecret = cleanString(appSecret);
+    if (!normalizedAppId || !normalizedSecret) {
+      throw new TypeError('QQ AppID and AppSecret are required');
+    }
+    if (this.#activeAttemptId) await this.cancelProvisioning(this.#activeAttemptId);
+    if (this.#closed) throw new Error('QQ controller is closed');
+    const identity = deriveQqBotIdentity(normalizedAppId);
+    await this.#withBotTransition(identity.botId, async () => {
+      if (this.#closed) throw new Error('QQ controller is closed');
+      const previousConfig = this.#configStore.getByAppId(normalizedAppId);
+      const previousSecret = await this.#credentials.resolve(identity.secretRef).catch(() => undefined);
+      if (this.#closed) throw new Error('QQ controller is closed');
+      const config = {
+        botId: identity.botId,
+        appId: normalizedAppId,
+        secretRef: identity.secretRef,
+        ownerUserOpenid: previousConfig?.ownerUserOpenid ?? '*',
+        createdAt: previousConfig?.createdAt ?? new Date().toISOString(),
+        connectedAt: new Date().toISOString(),
+      };
+      await this.#credentials.set(identity.secretRef, normalizedSecret);
+      try {
+        await this.#configStore.save(config);
+      } catch (error) {
+        await this.#restoreCredential(identity.secretRef, previousSecret);
+        throw error;
+      }
+      try {
+        await this.#startRuntime(config, normalizedSecret);
+        this.#errors.delete(identity.botId);
+      } catch (error) {
+        this.#errors.set(identity.botId, safeError('connection-failed', 'QQ 机器人已绑定，消息连接暂未就绪。'));
+        this.#logger.warn?.(`[dsh-im:qq] bot ${identity.botId} credential connection failed:`, error);
+      }
+      this.#touch();
+    });
+    return this.status();
+  }
+
   async cancelProvisioning(attemptId) {
     const record = this.#attempts.get(attemptId);
     if (!record) return null;
@@ -281,6 +323,7 @@ export class QqController {
     if (this.#closed) return;
     this.#closed = true;
     if (this.#activeAttemptId) await this.cancelProvisioning(this.#activeAttemptId);
+    await Promise.allSettled([...this.#transitions.values()]);
     await Promise.allSettled([...this.#runtimes.keys()].map((botId) => this.#stopRuntime(botId)));
   }
 
@@ -358,7 +401,9 @@ export class QqController {
   }
 
   async #startRuntime(config, appSecret) {
+    if (this.#closed) throw new Error('QQ controller is closed');
     await this.#stopRuntime(config.botId);
+    if (this.#closed) throw new Error('QQ controller is closed');
     const runtime = await this.#createRuntime({ botId: config.botId, config, appSecret });
     if (!runtime || typeof runtime.start !== 'function' || typeof runtime.stop !== 'function') {
       throw new TypeError('createRuntime returned an invalid QQ runtime');

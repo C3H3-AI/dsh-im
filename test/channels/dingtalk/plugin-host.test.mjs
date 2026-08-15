@@ -9,6 +9,7 @@ function controller() {
     startProvisioning() {},
     registrationStatus() {},
     cancelProvisioning() {},
+    bindCredentials() {},
     reconnectBot() {},
     deleteBot() {},
     approveSender() {},

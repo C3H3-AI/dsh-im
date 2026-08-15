@@ -148,6 +148,30 @@ test('successful QR poll stores secret then config then starts runtime without p
   await controller.close();
 });
 
+test('manual DingTalk Client ID and Client Secret binding stores credentials off the public plane', async () => {
+  const events = [];
+  const credentials = credentialsFixture(events);
+  const configs = configFixture([], events);
+  const runtimes = runtimeFactory({ events });
+  const controller = new DingtalkController({
+    deviceAuth: successfulDeviceAuth(),
+    credentials: credentials.provider,
+    configStore: configs.store,
+    createRuntime: runtimes.createRuntime,
+    clock: () => 1_000,
+  });
+
+  const status = await controller.bindCredentials({
+    clientId: 'manual-ding-client',
+    clientSecret: 'manual-ding-secret',
+  });
+  assert.equal(status.totals.connected, 1);
+  assert.equal([...credentials.values.values()][0], 'manual-ding-secret');
+  assert.equal(runtimes.runtimes[0].clientSecret, 'manual-ding-secret');
+  assert.doesNotMatch(JSON.stringify(status), /manual-ding-client|manual-ding-secret|secretRef/);
+  await controller.close();
+});
+
 test('scanning the same client ID is idempotent and replaces its one runtime', async () => {
   const events = [];
   const credentials = credentialsFixture(events);

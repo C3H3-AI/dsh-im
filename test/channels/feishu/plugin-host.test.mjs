@@ -131,6 +131,10 @@ test('RPC dispatch matches every endpoint in client/api.js', async () => {
       return current;
     },
     reconnect: async () => { calls.push('test'); return current; },
+    bindCredentials: async ({ appId, appSecret }) => {
+      calls.push(`bind:${appId}:${appSecret}`);
+      return current;
+    },
     disconnect: async () => { calls.push('disconnect'); return status(); },
   };
   const fx = await rpcFixture(controller);
@@ -155,6 +159,14 @@ test('RPC dispatch matches every endpoint in client/api.js', async () => {
   const tested = await fx.registration.handler(FEISHU_ENDPOINTS.testConnection, {}, signal());
   assert.equal(tested.ok, true);
 
+  const bound = await fx.registration.handler(
+    FEISHU_ENDPOINTS.bindCredentials,
+    { appId: 'cli_manual', appSecret: 'manual-private-secret' },
+    signal(),
+  );
+  assert.equal(bound.ok, true);
+  assert.doesNotMatch(JSON.stringify(bound), /manual-private-secret|appSecret/);
+
   const cancelled = await fx.registration.handler(
     FEISHU_ENDPOINTS.cancelProvisioning,
     { attemptId: '7' },
@@ -169,7 +181,9 @@ test('RPC dispatch matches every endpoint in client/api.js', async () => {
     signal(),
   );
   assert.equal(disconnected.ok, true);
-  assert.deepEqual(calls, ['begin', 'test', 'cancel', 'disconnect']);
+  assert.deepEqual(calls, [
+    'begin', 'test', 'bind:cli_manual:manual-private-secret', 'cancel', 'disconnect',
+  ]);
 
   const attemptedSecret = await fx.registration.handler(
     FEISHU_ENDPOINTS.beginProvisioning,

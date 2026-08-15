@@ -79,7 +79,6 @@ const CSS = String.raw`
 .ddt-errorCode { font: 11px ui-monospace, SFMono-Regular, monospace; opacity: .8; }
 .ddt-listHeading { display: flex; align-items: center; justify-content: space-between; margin: 2px 0 9px; }
 .ddt-listHeading h3 { margin: 0; font-size: 14px; }
-.ddt-listHeading span { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 12px; }
 .ddt-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .ddt-accountTop { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .ddt-accountIdentity { min-width: 0; display: flex; align-items: center; gap: 12px; }

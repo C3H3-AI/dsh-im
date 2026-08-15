@@ -47,4 +47,5 @@ test('isAllowedSender enforces an open-id allowlist', () => {
   assert.equal(isAllowedSender(event, new Set()), false);
   assert.equal(isAllowedSender(event, new Set(['ou_allowed'])), true);
   assert.equal(isAllowedSender(event, new Set(['ou_other'])), false);
+  assert.equal(isAllowedSender(event, new Set(['*'])), true);
 });

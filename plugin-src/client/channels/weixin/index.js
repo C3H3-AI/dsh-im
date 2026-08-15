@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { WeixinLogoGlyph } from '../../channel-logos.js';
+import { QrActionIcon } from '../../credential-binding.js';
 import {
   WEIXIN_ENDPOINTS,
   WEIXIN_RPC_CHANNEL,
@@ -42,7 +43,8 @@ function Heading({ totals, adding, busy, onAdd, addButtonRef }) {
         onClick: onAdd,
         disabled: adding || busy,
         ref: addButtonRef,
-      }, adding ? '正在绑定' : '扫码绑定微信'),
+        'aria-label': '扫码接入微信机器人',
+      }, h(QrActionIcon), adding ? '正在接入' : '扫码接入机器人'),
       totals.configured > 0
         ? h('div', { className: 'dxw-badge dim-onlineBadge' },
             h('span', null, `${totals.connected} / ${totals.configured} 在线`))
@@ -195,6 +197,7 @@ function checkedTime(timestamp) {
 export function AccountCard({ account, busy, removing, onReconnect, onRequestRemove, onConfirmRemove, onCancelRemove }) {
   const state = busy === 'reconnect' ? 'connecting' : account.state;
   const tone = account.connected ? 'success' : state === 'error' ? 'error' : 'warning';
+  const summary = account.error?.message ?? (account.connected ? null : account.health.summary);
   return h('article', { className: 'dxw-card dim-botCard', tabIndex: -1, 'data-bot-id': account.botId },
     h('div', { className: 'dxw-cardBody dim-botCardBody' },
       h('div', { className: 'dxw-accountTop dim-botCardTop' },
@@ -210,7 +213,7 @@ export function AccountCard({ account, busy, removing, onReconnect, onRequestRem
         h('div', { className: 'dxw-metric dim-botMetric' }, h('dt', null, '最近检查'),
           h('dd', null, checkedTime(account.health.lastCheckedAt)))),
       h('div', { className: 'dxw-accountFooter dim-cardFooter' },
-        h('div', { className: 'dxw-summary dim-cardSummary' }, account.error?.message ?? account.health.summary),
+        summary ? h('div', { className: 'dxw-summary dim-cardSummary' }, summary) : null,
         h('div', { className: 'dxw-actions dim-cardActions' },
           h(Button, { className: 'dim-cardAction', onClick: onReconnect, disabled: Boolean(busy) },
             busy === 'reconnect' ? '检查中…' : account.connected ? '检查连接' : '重试连接'),
@@ -227,7 +230,7 @@ export function AccountCard({ account, busy, removing, onReconnect, onRequestRem
 
 function AccountList(props) {
   return h('section', { className: 'dim-listSection' },
-    h('div', { className: 'dxw-listHeading dim-listHeading' }, h('h3', null, '已接入的微信账号'), h('span', null, `${props.bots.length} 个`)),
+    h('div', { className: 'dxw-listHeading dim-listHeading' }, h('h3', null, '已接入的微信账号')),
     h('ul', { className: 'dxw-list dim-botList' }, props.bots.map((account) => h('li', { key: account.botId },
       h(AccountCard, {
         account,

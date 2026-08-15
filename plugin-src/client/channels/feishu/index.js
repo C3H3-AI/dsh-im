@@ -1,6 +1,7 @@
 import * as React from "react";
 
 import { FeishuLogoGlyph } from "../../channel-logos.js";
+import { CredentialActionIcon, CredentialBindingPanel, QrActionIcon } from "../../credential-binding.js";
 import {
   FEISHU_ENDPOINTS,
   FEISHU_RPC_CHANNEL,
@@ -125,19 +126,32 @@ function BrandMark() {
   return h("div", { className: "bxf-brandMark" }, h(RobotIcon, { size: 34 }));
 }
 
-function Heading({ totals, onAdd, adding, busy, addButtonRef }) {
+function Heading({ totals, onAdd, onCredential, credentialOpen, adding, busy, addButtonRef }) {
   const hasBots = totals.configured > 0;
   return h("div", { className: "bxf-heading" },
     h("div", { className: "bxf-headingTools" },
-      h(Button, {
-        kind: "primary",
-        size: "small",
-        className: "bxf-bindButton dim-scanButton",
-        onClick: onAdd,
-        disabled: adding || busy,
-        ref: addButtonRef,
-        "aria-busy": busy ? "true" : undefined,
-      }, adding ? "正在绑定" : "扫码绑定机器人"),
+      h("div", { className: "dim-bindActions" },
+        h(Button, {
+          kind: "primary",
+          size: "small",
+          className: "bxf-bindButton dim-scanButton",
+          onClick: onAdd,
+          disabled: adding || busy,
+          ref: addButtonRef,
+          "aria-busy": busy ? "true" : undefined,
+          "aria-label": "扫码接入飞书机器人",
+          icon: h(QrActionIcon),
+        }, adding ? "正在接入" : "扫码接入机器人"),
+        h(Button, {
+          kind: "credential",
+          size: "small",
+          className: "dim-credentialButton",
+          onClick: onCredential,
+          disabled: adding || busy,
+          "aria-pressed": credentialOpen,
+          "aria-label": "使用 App ID 和 App Secret 绑定飞书机器人",
+          icon: h(CredentialActionIcon),
+        }, credentialOpen ? "收起凭据" : "手动接入")),
       hasBots
         ? h("div", {
             className: "bxf-totalBadge dim-onlineBadge",
@@ -368,7 +382,7 @@ export function BotCard({
       : "error";
   const summary = actionError?.message
     ?? connection.error?.message
-    ?? health.summary;
+    ?? (connected ? null : health.summary);
   const titleId = `bxf-bot-${connection.botId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
   return h("article", {
     className: "bxf-card bxf-botCard dim-botCard",
@@ -397,8 +411,8 @@ export function BotCard({
           h("dd", null, formatCheckedTime(health.lastCheckedAt))),
       ),
       h("div", { className: "bxf-connectedFooter dim-cardFooter" },
-        h("div", { className: "bxf-healthSummary dim-cardSummary", "data-error": actionError || connection.error ? "true" : undefined },
-          summary),
+        summary ? h("div", { className: "bxf-healthSummary dim-cardSummary", "data-error": actionError || connection.error ? "true" : undefined },
+          summary) : null,
         h("div", { className: "bxf-actions bxf-botActions dim-cardActions" },
           h(Button, {
             className: "dim-cardAction", onClick: onReconnect,
@@ -426,8 +440,7 @@ export function BotCard({
 function BotList(props) {
   return h("section", { className: "bxf-listSection dim-listSection", "aria-labelledby": "bxf-bot-list-title" },
     h("div", { className: "bxf-listHeading dim-listHeading" },
-      h("h3", { id: "bxf-bot-list-title" }, "已接入的机器人"),
-      h("span", null, `${props.bots.length} 个`)),
+      h("h3", { id: "bxf-bot-list-title" }, "已接入的机器人")),
     h("ul", { className: "bxf-botList dim-botList", role: "list" },
       props.bots.map((bot) => h("li", { key: bot.botId },
         h(BotCard, {
@@ -501,6 +514,9 @@ export function FeishuSettingsTab({ rpcCall }) {
   });
   const [pageBusy, setPageBusy] = React.useState(false);
   const [provisionBusy, setProvisionBusy] = React.useState(false);
+  const [credentialOpen, setCredentialOpen] = React.useState(false);
+  const [credentialBusy, setCredentialBusy] = React.useState(false);
+  const [credentialError, setCredentialError] = React.useState(null);
   const [busyByBot, setBusyByBot] = React.useState({});
   const [errorsByBot, setErrorsByBot] = React.useState({});
   const [removeTargetId, setRemoveTargetId] = React.useState(null);
@@ -589,6 +605,8 @@ export function FeishuSettingsTab({ rpcCall }) {
   }, [focusBotId, model.bots]);
 
   const startProvisioning = React.useCallback(async ({ replace = false } = {}) => {
+    setCredentialOpen(false);
+    setCredentialError(null);
     setProvisionBusy(true);
     announce("");
     const previousAttemptId = model.provisioning?.attemptId;
@@ -626,6 +644,24 @@ export function FeishuSettingsTab({ rpcCall }) {
       setProvisionBusy(false);
     }
   }, [announce, invoke, model.provisioning?.attemptId]);
+
+  const bindCredentials = React.useCallback(async ({ identity, secret }) => {
+    setCredentialBusy(true);
+    setCredentialError(null);
+    try {
+      const snapshot = normalizeBotsSnapshot(await invoke(
+        FEISHU_ENDPOINTS.bindCredentials,
+        { appId: identity, appSecret: secret },
+      ));
+      mergeSnapshot(snapshot);
+      setCredentialOpen(false);
+      announce("飞书机器人凭据已绑定。");
+    } catch (error) {
+      setCredentialError(presentError(error));
+    } finally {
+      setCredentialBusy(false);
+    }
+  }, [announce, invoke, mergeSnapshot]);
 
   const cancelProvisioning = React.useCallback(async () => {
     const attemptId = model.provisioning?.attemptId;
@@ -852,6 +888,20 @@ export function FeishuSettingsTab({ rpcCall }) {
     });
   }
 
+  const credentialContent = credentialOpen
+    ? h(CredentialBindingPanel, {
+        channel: "飞书",
+        identityLabel: "App ID",
+        identityPlaceholder: "填写飞书开放平台 App ID",
+        secretLabel: "App Secret",
+        secretPlaceholder: "填写飞书开放平台 App Secret",
+        busy: credentialBusy,
+        error: credentialError,
+        onSubmit: bindCredentials,
+        onCancel: () => { setCredentialOpen(false); setCredentialError(null); },
+      })
+    : null;
+
   const setCardRef = React.useCallback((botId, node) => {
     if (node) cardRefs.current.set(botId, node);
     else cardRefs.current.delete(botId);
@@ -865,8 +915,10 @@ export function FeishuSettingsTab({ rpcCall }) {
     h(Heading, {
       totals: model.totals,
       onAdd: () => void startProvisioning(),
+      onCredential: () => { setCredentialOpen((value) => !value); setCredentialError(null); },
+      credentialOpen,
       adding: Boolean(provision),
-      busy: provisionBusy,
+      busy: provisionBusy || credentialBusy,
       addButtonRef,
     }),
     h("div", {
@@ -887,8 +939,9 @@ export function FeishuSettingsTab({ rpcCall }) {
             busy: pageBusy,
           })
         : h(React.Fragment, null,
+            credentialContent,
             provisionContent,
-            model.bots.length === 0 && !provision
+            model.bots.length === 0 && !provision && !credentialOpen
               ? h(EmptyView, { onStart: () => void startProvisioning(), busy: provisionBusy })
               : null,
             model.bots.length > 0

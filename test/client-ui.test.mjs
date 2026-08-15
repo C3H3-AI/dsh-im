@@ -6,6 +6,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { IMSettingsTab } from '../plugin-src/client/index.js';
+import { CredentialBindingPanel } from '../plugin-src/client/credential-binding.js';
 import { DINGTALK_ENDPOINTS } from '../plugin-src/client/channels/dingtalk/api.js';
 import {
   AccountCard as DingtalkAccountCard,
@@ -23,6 +24,7 @@ import {
   AccountCard as WecomAccountCard,
   WecomSettingsTab,
 } from '../plugin-src/client/channels/wecom/index.js';
+import { QqSettingsTab } from '../plugin-src/client/channels/qq/index.js';
 
 const STYLES_URL = new URL('../plugin-src/client/styles.js', import.meta.url);
 const FEISHU_STYLES_URL = new URL(
@@ -58,8 +60,13 @@ const WECOM_SOURCE_URL = new URL(
   '../plugin-src/client/channels/wecom/index.js',
   import.meta.url,
 );
+const QQ_SOURCE_URL = new URL(
+  '../plugin-src/client/channels/qq/index.js',
+  import.meta.url,
+);
 
-test('IM settings renders five compact logo channel tabs without enable switches', () => {
+test('IM settings renders five compact logo channel tabs without enable switches', async () => {
+  const styles = await readFile(STYLES_URL, 'utf8');
   const markup = renderToStaticMarkup(React.createElement(IMSettingsTab, {
     feishuRpcCall: async () => ({ ok: true, value: {} }),
     weixinRpcCall: async () => ({ ok: true, value: {} }),
@@ -81,6 +88,7 @@ test('IM settings renders five compact logo channel tabs without enable switches
   assert.match(markup, /dim-logoDingtalk/);
   assert.match(markup, /dim-logoWecom/);
   assert.match(markup, /dim-logoQq/);
+  assert.match(styles, /\.dim-logoFeishu svg \{ width: 28px; height: 28px; \}/);
   assert.equal((markup.match(/role="tab"/g) ?? []).length, 5);
   assert.equal((markup.match(/aria-selected="true"/g) ?? []).length, 1);
   assert.doesNotMatch(markup, /role="switch"|type="checkbox"/);
@@ -130,6 +138,7 @@ test('Feishu bot cards place the application identifier under the bot name', asy
   assert.match(markup, /class="bxf-healthPill dim-botHealth"/);
   assert.match(markup, /<button[^>]*aria-label="检查连接今天是牢梁"[^>]*><span>检查连接<\/span><\/button>/);
   assert.match(markup, /class="bxf-connectedFooter dim-cardFooter"/);
+  assert.doesNotMatch(markup, /dim-cardSummary|长连接运行正常/);
   assert.equal((markup.match(/dim-cardAction(?: |")/g) ?? []).length, 2);
   assert.doesNotMatch(markup, /连接状态：|bxf-divider/);
   assert.doesNotMatch(markup, /custom-bot-avatar/);
@@ -145,11 +154,58 @@ test('Feishu keeps its heading controls on one row without a plus icon', async (
     rpcCall: async () => ({ ok: true, value: {} }),
   }));
 
-  assert.match(markup, /class="bxf-button bxf-bindButton dim-scanButton"[^>]*><span>扫码绑定机器人<\/span><\/button>/);
+  assert.match(markup, /aria-label="扫码接入飞书机器人"/);
+  assert.match(markup, /class="dim-actionIcon"[^]*<span>扫码接入机器人<\/span>/);
   assert.doesNotMatch(markup, />添加机器人</);
   assert.match(styles, /\.bxf-headingTools \{[^}]*justify-content: space-between;[^}]*flex-wrap: nowrap;/);
   assert.match(styles, /@container \(max-width: 620px\)[^]*\.bxf-headingTools \{ gap: 6px; \}/);
   assert.doesNotMatch(styles, /\.bxf-headingTools \.bxf-button \{ margin-left: auto; \}/);
+});
+
+test('credential binding is a distinct secondary action beside QR binding in four channels', async () => {
+  const settings = [
+    ['飞书', FeishuSettingsTab],
+    ['QQ', QqSettingsTab],
+    ['钉钉', DingtalkSettingsTab],
+    ['企业微信', WecomSettingsTab],
+  ];
+  for (const [channel, Component] of settings) {
+    const markup = renderToStaticMarkup(React.createElement(Component, {
+      rpcCall: async () => ({ ok: true, value: {} }),
+    }));
+    const scanIndex = markup.indexOf('dim-scanButton');
+    const credentialIndex = markup.indexOf('dim-credentialButton');
+    assert.ok(scanIndex >= 0, `${channel} should render a QR button`);
+    assert.ok(credentialIndex > scanIndex, `${channel} should place credential binding after QR binding`);
+    assert.match(markup, /data-kind="credential"/);
+    const credentialMarkup = markup.slice(credentialIndex, markup.indexOf('</button>', credentialIndex));
+    assert.match(credentialMarkup, /dim-actionIcon/);
+    assert.match(credentialMarkup, /手动接入/);
+  }
+
+  const styles = await readFile(STYLES_URL, 'utf8');
+  assert.match(styles, /\.dim-panel \.dim-bindActions \{[^}]*flex-wrap: nowrap;/);
+  assert.match(styles, /\.dim-panel \.dim-credentialButton \{[^}]*border: 1px solid #86909c;[^}]*background: var\(--dsw-alias-bg-body, #fff\)/);
+  assert.match(styles, /\.dim-panel \.dim-actionIcon \{[^}]*flex: 0 0 15px;/);
+  assert.doesNotMatch(styles, /\.dim-panel \.dim-credentialPanel \{[^}]*border-left:/);
+});
+
+test('credential form stays compact while using a protected password input', () => {
+  const markup = renderToStaticMarkup(React.createElement(CredentialBindingPanel, {
+    channel: '企业微信',
+    identityLabel: 'Bot ID',
+    identityPlaceholder: '填写 Bot ID',
+    secretLabel: 'Secret',
+    secretPlaceholder: '填写 Secret',
+    onSubmit() {},
+    onCancel() {},
+  }));
+  assert.match(markup, />Bot ID</);
+  assert.match(markup, /type="password"/);
+  assert.match(markup, /autoComplete="new-password"/i);
+  assert.match(markup, />手动接入企业微信机器人</);
+  assert.doesNotMatch(markup, /已有机器人应用|Harness 会校验凭据|可见范围|受保护的凭据存储/);
+  assert.doesNotMatch(markup, /value="[^"]+"/);
 });
 
 test('scan actions align left while online totals align right in every channel', async () => {
@@ -179,10 +235,10 @@ test('scan actions align left while online totals align right in every channel',
   const weixinHeading = headingSource(weixinSource);
   const dingtalkHeading = headingSource(dingtalkSource);
   const wecomHeading = headingSource(wecomSource);
-  assert.ok(feishuHeading.indexOf('扫码绑定机器人') < feishuHeading.indexOf('bxf-totalBadge'));
-  assert.ok(weixinHeading.indexOf('扫码绑定微信') < weixinHeading.indexOf('dxw-badge'));
-  assert.ok(dingtalkHeading.indexOf('扫码接入钉钉') < dingtalkHeading.indexOf('ddt-badge'));
-  assert.ok(wecomHeading.indexOf('扫码绑定企业微信机器人') < wecomHeading.indexOf('ddt-badge'));
+  assert.ok(feishuHeading.indexOf('扫码接入机器人') < feishuHeading.indexOf('bxf-totalBadge'));
+  assert.ok(weixinHeading.indexOf('扫码接入机器人') < weixinHeading.indexOf('dxw-badge'));
+  assert.ok(dingtalkHeading.indexOf('扫码接入机器人') < dingtalkHeading.indexOf('ddt-badge'));
+  assert.ok(wecomHeading.indexOf('扫码接入机器人') < wecomHeading.indexOf('ddt-badge'));
 
   for (const heading of [feishuHeading, weixinHeading, dingtalkHeading, wecomHeading]) {
     assert.match(heading, /dim-scanButton/);
@@ -202,6 +258,20 @@ test('channel headings omit the redundant local credential badge', () => {
       rpcCall: async () => ({ ok: true, value: {} }),
     }));
     assert.doesNotMatch(markup, /凭据仅保存在本机/);
+  }
+});
+
+test('bot list headings omit the total already shown by the online badge', async () => {
+  const sources = await Promise.all([
+    FEISHU_SOURCE_URL,
+    WEIXIN_SOURCE_URL,
+    DINGTALK_CLIENT_SOURCE_URL,
+    WECOM_SOURCE_URL,
+    QQ_SOURCE_URL,
+  ].map((url) => readFile(url, 'utf8')));
+
+  for (const source of sources) {
+    assert.doesNotMatch(source, /length} 个/);
   }
 });
 
@@ -277,6 +347,7 @@ test('bot cards reuse the same channel brand logos as the channel rail', () => {
   assert.match(accountMarkup, /class="dxw-avatar dim-botAvatar"[^]*data-im-channel-logo="weixin"/);
   assert.match(accountMarkup, /class="dxw-health dim-botHealth"/);
   assert.match(accountMarkup, /class="dxw-accountFooter dim-cardFooter"/);
+  assert.doesNotMatch(accountMarkup, /dim-cardSummary|微信消息长轮询运行正常/);
   assert.equal((accountMarkup.match(/dim-cardAction(?: |")/g) ?? []).length, 2);
   assert.equal((accountMarkup.match(/class="dxw-metric dim-botMetric"/g) ?? []).length, 2);
   assert.doesNotMatch(accountMarkup, /收到 \/ 回复/);
@@ -316,6 +387,7 @@ test('DingTalk bot cards omit the redundant received and replied metric', () => 
   assert.match(markup, /class="ddt-health dim-botHealth"/);
   assert.equal((markup.match(/class="ddt-metric dim-botMetric"/g) ?? []).length, 2);
   assert.match(markup, /class="ddt-accountFooter dim-cardFooter"/);
+  assert.doesNotMatch(markup, /dim-cardSummary|Stream 长连接运行正常/);
   assert.equal((markup.match(/dim-cardAction(?: |")/g) ?? []).length, 2);
   assert.match(markup, />消息通道<[^]*>最近检查</);
   assert.doesNotMatch(markup, /收到 \/ 回复/);

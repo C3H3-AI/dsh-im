@@ -19,6 +19,7 @@ test('client exposes the fixed DingTalk RPC channel and endpoint names', () => {
     beginProvisioning: 'provision.begin',
     pollProvisioning: 'provision.poll',
     cancelProvisioning: 'provision.cancel',
+    bindCredentials: 'bot.bind-credentials',
     reconnectBot: 'bot.reconnect',
     deleteBot: 'bot.delete',
   });

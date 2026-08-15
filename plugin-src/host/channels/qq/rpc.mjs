@@ -6,6 +6,7 @@ export const QQ_ENDPOINTS = Object.freeze({
   beginProvisioning: 'provision.begin',
   pollProvisioning: 'provision.poll',
   cancelProvisioning: 'provision.cancel',
+  bindCredentials: 'bot.bind-credentials',
   reconnectBot: 'bot.reconnect',
   deleteBot: 'bot.delete',
 });
@@ -27,6 +28,10 @@ function validId(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 }
 
+function validCredential(value, maxLength) {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= maxLength;
+}
+
 function payloadFailure(endpoint, payload) {
   if (!isRecord(payload)) return 'Payload must be an object.';
   if (endpoint === QQ_ENDPOINTS.status) return exactKeys(payload, []) ? null : 'connection.status does not accept fields.';
@@ -37,6 +42,12 @@ function payloadFailure(endpoint, payload) {
   if ([QQ_ENDPOINTS.pollProvisioning, QQ_ENDPOINTS.cancelProvisioning].includes(endpoint)) {
     return exactKeys(payload, ['attemptId']) && validId(payload.attemptId)
       ? null : `${endpoint} requires an attemptId.`;
+  }
+  if (endpoint === QQ_ENDPOINTS.bindCredentials) {
+    return exactKeys(payload, ['appId', 'appSecret'])
+      && validCredential(payload.appId, 256)
+      && validCredential(payload.appSecret, 1024)
+      ? null : 'bot.bind-credentials requires AppID and AppSecret.';
   }
   if (endpoint === QQ_ENDPOINTS.reconnectBot) {
     return exactKeys(payload, ['botId']) && validId(payload.botId) ? null : 'bot.reconnect requires a botId.';
@@ -76,7 +87,7 @@ async function publicStatus(status, encodeQr) {
 }
 
 export function createQqRpcHandler(controller, { encodeQr = qrDataUrl } = {}) {
-  for (const method of ['status', 'startProvisioning', 'registrationStatus', 'cancelProvisioning', 'reconnectBot', 'deleteBot']) {
+  for (const method of ['status', 'startProvisioning', 'registrationStatus', 'cancelProvisioning', 'bindCredentials', 'reconnectBot', 'deleteBot']) {
     if (typeof controller?.[method] !== 'function') throw new TypeError(`A complete QQ controller is required (${method})`);
   }
   const qrCache = new Map();
@@ -104,6 +115,8 @@ export function createQqRpcHandler(controller, { encodeQr = qrDataUrl } = {}) {
         value = await withEncodedQr(current, cachedEncode);
       } else if (endpoint === QQ_ENDPOINTS.cancelProvisioning) {
         value = sanitizePublic(await controller.cancelProvisioning(payload.attemptId));
+      } else if (endpoint === QQ_ENDPOINTS.bindCredentials) {
+        value = await publicStatus(await controller.bindCredentials(payload), cachedEncode);
       } else if (endpoint === QQ_ENDPOINTS.reconnectBot) {
         value = await publicStatus(await controller.reconnectBot(payload.botId), cachedEncode);
       } else {

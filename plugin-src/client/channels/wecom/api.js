@@ -5,6 +5,7 @@ export const WECOM_ENDPOINTS = Object.freeze({
   beginProvisioning: 'provision.begin',
   pollProvisioning: 'provision.poll',
   cancelProvisioning: 'provision.cancel',
+  bindCredentials: 'bot.bind-credentials',
   reconnectBot: 'bot.reconnect',
   deleteBot: 'bot.delete',
 });

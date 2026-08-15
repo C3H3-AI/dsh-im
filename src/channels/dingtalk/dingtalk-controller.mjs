@@ -280,6 +280,50 @@ export class DingtalkController {
     }
   }
 
+  /** Binds one DingTalk application with an existing Client ID and Client Secret. */
+  async bindCredentials({ clientId, clientSecret } = {}) {
+    if (this.#closed) throw new Error('dsh-dingtalk controller is closed');
+    const normalizedClientId = cleanString(clientId);
+    const normalizedSecret = cleanString(clientSecret);
+    if (!normalizedClientId || !normalizedSecret) {
+      throw new TypeError('DingTalk Client ID and Client Secret are required');
+    }
+    if (this.#activeAttemptId) await this.cancelProvisioning(this.#activeAttemptId);
+    if (this.#closed) throw new Error('dsh-dingtalk controller is closed');
+    const identity = deriveDingtalkBotIdentity(normalizedClientId);
+    await this.#withBotTransition(identity.botId, async () => {
+      if (this.#closed) throw abortError();
+      const previousConfig = this.#configStore.getByClientId(normalizedClientId);
+      const previousSecret = await this.#credentials.resolve(identity.secretRef).catch(() => undefined);
+      if (this.#closed) throw abortError();
+      const config = {
+        botId: identity.botId,
+        clientId: normalizedClientId,
+        secretRef: identity.secretRef,
+        approvedSenders: previousConfig?.approvedSenders ?? [],
+      };
+      await this.#credentials.set(identity.secretRef, normalizedSecret);
+      try {
+        await this.#configStore.save(config);
+      } catch (error) {
+        await this.#restoreCredential(identity.secretRef, previousSecret);
+        throw error;
+      }
+      try {
+        await this.#startRuntime(config, normalizedSecret);
+        this.#errors.delete(identity.botId);
+      } catch {
+        this.#errors.set(
+          identity.botId,
+          safeError('connection-failed', '钉钉已接入，但消息连接暂未就绪，请稍后重试。'),
+        );
+        this.#logger.warn?.('[dsh-dingtalk] credential-bound bot saved but its connection is not ready');
+      }
+      this.#touch();
+    });
+    return this.status();
+  }
+
   /** Polls one QR registration without exposing its device code or returned secret. */
   async registrationStatus(attemptId) {
     const record = this.#attempts.get(attemptId);

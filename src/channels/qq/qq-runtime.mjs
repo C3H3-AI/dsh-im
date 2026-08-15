@@ -113,7 +113,8 @@ export class QqRuntime {
     });
     bot.use?.(this.#typingMiddleware({
       keepAlive: true,
-      predicate: (ctx) => ctx?.message?.senderId === this.#config.ownerUserOpenid,
+      predicate: (ctx) => this.#config.ownerUserOpenid === '*'
+        || ctx?.message?.senderId === this.#config.ownerUserOpenid,
     }));
 
     const controller = new AbortController();

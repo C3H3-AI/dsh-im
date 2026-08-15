@@ -19,6 +19,7 @@ function controller(overrides = {}) {
     }),
     registrationStatus: async () => ({ attemptId: 'attempt_1', status: 'pending' }),
     cancelProvisioning: async () => ({ attemptId: 'attempt_1', status: 'cancelled' }),
+    bindCredentials: async () => ({ bots: [] }),
     reconnectBot: async () => ({ bots: [] }),
     deleteBot: async () => ({ bots: [] }),
     approveSender: async () => ({ bots: [] }),
@@ -74,6 +75,24 @@ test('RPC validates mutating requests before invoking the controller', async () 
   assert.equal(rejected.ok, false);
   assert.equal(rejected.error.code, 'bad-request');
   assert.equal(calls, 0);
+});
+
+test('credential RPC accepts Client ID fields while keeping Client Secret host-only', async () => {
+  let received;
+  const handler = createDingtalkRpcHandler(controller({
+    bindCredentials: async (payload) => {
+      received = payload;
+      return { bots: [], clientSecret: payload.clientSecret };
+    },
+  }));
+
+  const result = await handler(DINGTALK_ENDPOINTS.bindCredentials, {
+    clientId: 'manual-client', clientSecret: 'manual-secret',
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(received, { clientId: 'manual-client', clientSecret: 'manual-secret' });
+  assert.doesNotMatch(JSON.stringify(result), /manual-secret|clientSecret/);
+  assert.equal((await handler(DINGTALK_ENDPOINTS.bindCredentials, { clientId: 'manual-client' })).ok, false);
 });
 
 test('RPC is registered for loopback clients only', () => {

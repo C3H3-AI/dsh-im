@@ -70,7 +70,6 @@ const CSS = String.raw`
 .dxw-errorCode { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; opacity: .8; }
 .dxw-listHeading { display: flex; justify-content: space-between; align-items: center; margin: 2px 0 9px; }
 .dxw-listHeading h3 { margin: 0; font-size: 14px; }
-.dxw-listHeading span { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 12px; }
 .dxw-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .dxw-accountTop { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .dxw-accountIdentity { display: flex; align-items: center; gap: 12px; min-width: 0; }

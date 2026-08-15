@@ -59,6 +59,10 @@ function safeOpaqueId(value) {
   return typeof value === 'string' && SAFE_ID.test(value);
 }
 
+function validCredential(value, maxLength) {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= maxLength;
+}
+
 function publicError(error) {
   if (!error || typeof error !== 'object') return null;
   const code = typeof error.code === 'string' && Object.hasOwn(PUBLIC_ERROR_MESSAGES, error.code)
@@ -233,6 +237,13 @@ function validPayload(endpoint, payload) {
     }
     return null;
   }
+  if (endpoint === FEISHU_ENDPOINTS.bindCredentials) {
+    return hasOnlyKeys(payload, new Set(['appId', 'appSecret']))
+      && validCredential(payload.appId, 256)
+      && validCredential(payload.appSecret, 1024)
+      ? null
+      : 'Credential binding requires App ID and App Secret.';
+  }
   if (endpoint === FEISHU_ENDPOINTS.pollProvisioning
     || endpoint === FEISHU_ENDPOINTS.cancelProvisioning) {
     return hasOnlyKeys(payload, new Set(['attemptId'])) && safeOpaqueId(payload.attemptId)
@@ -393,6 +404,14 @@ export function createFeishuRpcHandler(controller, { encodeQr = qrCodeDataUrl } 
         if (url) qrCache.delete(url);
         attemptQr.delete(payload.attemptId);
         value = { status: 'failed', message: 'Registration was cancelled.' };
+      } else if (endpoint === FEISHU_ENDPOINTS.bindCredentials) {
+        if (typeof controller.bindCredentials !== 'function') {
+          throw new Error('Credential binding is unavailable');
+        }
+        value = await toPublicFeishuStatus(
+          await controller.bindCredentials(payload),
+          { encodeQr: cachedEncodeQr },
+        );
       } else if (endpoint === FEISHU_ENDPOINTS.testConnection) {
         const current = await controller.status();
         const alreadyConnected = current?.connected === true

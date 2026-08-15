@@ -6,6 +6,7 @@ const ACTIVE_REGISTRATION_STATES = new Set([
   'starting', 'qr_ready', 'polling', 'slow_down', 'domain_switched',
 ]);
 const MUTABLE_REGISTRATION_STATES = new Set([...ACTIVE_REGISTRATION_STATES, 'saving']);
+const ALL_VISIBLE_SENDERS = '*';
 
 function idleConnection() {
   return {
@@ -224,6 +225,75 @@ export class MultiBotDshFeishuController {
     return this.#status({
       registration: this.#registrations.get(this.#latestRegistrationId) ?? null,
       selectedBotId: botId,
+    });
+  }
+
+  async bindCredentials({ appId, appSecret, domain = 'feishu' } = {}) {
+    this.#assertOpen();
+    const normalizedAppId = typeof appId === 'string' ? appId.trim() : '';
+    const normalizedSecret = typeof appSecret === 'string' ? appSecret.trim() : '';
+    const normalizedDomain = domain === 'lark' ? 'lark' : 'feishu';
+    if (!normalizedAppId || !normalizedSecret) {
+      throw new TypeError('Feishu App ID and App Secret are required');
+    }
+
+    return this.#serializeConfig(async () => {
+      this.#assertOpen();
+      const bot = await this.#verifyApp({
+        appId: normalizedAppId,
+        appSecret: normalizedSecret,
+        domain: normalizedDomain,
+      });
+      this.#assertOpen();
+      const existing = this.#configStore.list().find(
+        (candidate) => candidate.appId === normalizedAppId,
+      );
+      const botId = existing?.id ?? this.#createBotId();
+      if (typeof botId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(botId)
+        || (!existing && this.#configStore.getBot(botId))) {
+        throw new Error('Bot id generator returned an invalid or duplicate id');
+      }
+      const secretRef = existing?.secretRef ?? secretRefFor(botId);
+      const previousSecret = await this.#credentials.resolve(secretRef).catch(() => undefined);
+      const config = {
+        ...existing,
+        id: botId,
+        appId: normalizedAppId,
+        secretRef,
+        ownerOpenIds: existing?.ownerOpenIds?.length
+          ? existing.ownerOpenIds
+          : [ALL_VISIBLE_SENDERS],
+        domain: normalizedDomain,
+        botName: bot.name,
+        botOpenId: bot.openId,
+        activated: bot.activated,
+        deletionPending: false,
+        connectedAt: new Date().toISOString(),
+        createdAt: existing?.createdAt ?? new Date().toISOString(),
+      };
+
+      await this.#credentials.set(secretRef, normalizedSecret);
+      let saved;
+      try {
+        saved = await this.#configStore.saveBot(config);
+      } catch (error) {
+        await this.#restoreCredential(secretRef, previousSecret);
+        throw error;
+      }
+
+      await this.#withBotTransition(botId, async () => {
+        try {
+          await this.#startRuntime(saved, normalizedSecret);
+          this.#botErrors.delete(botId);
+        } catch {
+          this.#botErrors.set(botId, {
+            code: 'connection_failed',
+            message: '机器人已经绑定，但长连接未就绪，请点击重试。',
+          });
+        }
+      });
+      this.#touch();
+      return this.status(botId);
     });
   }
 

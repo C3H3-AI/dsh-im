@@ -52,6 +52,40 @@ test('Enterprise WeChat QR success stores Secret off-config and starts its runti
   assert.doesNotMatch(JSON.stringify(status), /private-secret|secretRef|remote-bot|host-only-code/);
 });
 
+test('Enterprise WeChat Bot ID and Secret binding stores credentials and starts its runtime', async () => {
+  const values = new Map();
+  const configs = [];
+  let runtimeArgs;
+  const controller = new WecomController({
+    qrAuth: { start: async () => ({}), poll: async () => ({ status: 'waiting' }) },
+    credentials: {
+      resolve: async (ref) => values.has(ref) ? { value: values.get(ref) } : undefined,
+      set: async (ref, value) => values.set(ref, value),
+      unset: async (ref) => values.delete(ref),
+    },
+    configStore: {
+      list: () => [...configs],
+      get: (id) => configs.find((value) => value.botId === id) ?? null,
+      getByRemoteBotId: (id) => configs.find((value) => value.remoteBotId === id) ?? null,
+      save: async (value) => { configs.splice(0, configs.length, value); },
+      remove: async () => null,
+    },
+    createRuntime: async (args) => {
+      runtimeArgs = args;
+      return {
+        status: { ready: true, wecomConnectionState: 'connected', harnessReachable: true },
+        start: async () => {}, stop: async () => {},
+      };
+    },
+  });
+  const status = await controller.bindCredentials({ botId: 'remote-manual', secret: 'manual-secret' });
+  assert.equal(status.totals.connected, 1);
+  assert.equal(values.get(configs[0].secretRef), 'manual-secret');
+  assert.equal(runtimeArgs.secret, 'manual-secret');
+  assert.doesNotMatch(JSON.stringify(status), /manual-secret|remote-manual|secretRef/);
+  await controller.close();
+});
+
 test('Enterprise WeChat RPC encodes the QR on Host and strips every authorization field', async () => {
   const handler = createWecomRpcHandler({
     status: () => ({ bots: [], totals: { configured: 0, connected: 0 } }),
@@ -66,6 +100,7 @@ test('Enterprise WeChat RPC encodes the QR on Host and strips every authorizatio
     }),
     registrationStatus: async () => null,
     cancelProvisioning: async () => ({}),
+    bindCredentials: async () => ({ bots: [], totals: { configured: 0, connected: 0 } }),
     reconnectBot: async () => ({}),
     deleteBot: async () => ({}),
   }, { encodeQr: async () => 'data:image/png;base64,YWJjZA==' });
@@ -73,4 +108,24 @@ test('Enterprise WeChat RPC encodes the QR on Host and strips every authorizatio
   assert.equal(result.ok, true);
   assert.equal(result.value.qrCodeDataUrl, 'data:image/png;base64,YWJjZA==');
   assert.doesNotMatch(JSON.stringify(result), /work\.weixin|never-public|remoteBotId|scode|secret/);
+});
+
+test('Enterprise WeChat credential RPC accepts official Bot ID fields and redacts Secret', async () => {
+  let received;
+  const handler = createWecomRpcHandler({
+    status: () => ({ bots: [], totals: { configured: 0, connected: 0 } }),
+    startProvisioning: async () => ({}), registrationStatus: async () => null,
+    cancelProvisioning: async () => ({}), reconnectBot: async () => ({}), deleteBot: async () => ({}),
+    bindCredentials: async (payload) => {
+      received = payload;
+      return { bots: [], totals: { configured: 0, connected: 0 }, secret: payload.secret };
+    },
+  });
+  const result = await handler(WECOM_ENDPOINTS.bindCredentials, {
+    botId: 'remote-manual', secret: 'manual-secret',
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(received, { botId: 'remote-manual', secret: 'manual-secret' });
+  assert.doesNotMatch(JSON.stringify(result), /manual-secret|"secret"/);
+  assert.equal((await handler(WECOM_ENDPOINTS.bindCredentials, { botId: 'remote-manual' })).ok, false);
 });

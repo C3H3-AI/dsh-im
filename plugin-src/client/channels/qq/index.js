@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { QqLogoGlyph } from '../../channel-logos.js';
+import { CredentialActionIcon, CredentialBindingPanel, QrActionIcon } from '../../credential-binding.js';
 import { installDingtalkStyles } from '../dingtalk/styles.js';
 import {
   QQ_ENDPOINTS,
@@ -38,16 +39,26 @@ function checkedTime(value) {
   }
 }
 
-function Heading({ totals, adding, busy, onAdd, addButtonRef }) {
+function Heading({ totals, adding, busy, onAdd, onCredential, credentialOpen, addButtonRef }) {
   return h('div', { className: 'ddt-heading' },
     h('div', { className: 'ddt-tools' },
-      h(Button, {
-        kind: 'primary',
-        className: 'dim-scanButton',
-        onClick: onAdd,
-        disabled: adding || busy,
-        ref: addButtonRef,
-      }, adding ? '正在绑定' : '扫码绑定QQ机器人'),
+      h('div', { className: 'dim-bindActions' },
+        h(Button, {
+          kind: 'primary',
+          className: 'dim-scanButton',
+          onClick: onAdd,
+          disabled: adding || busy,
+          ref: addButtonRef,
+          'aria-label': '扫码接入 QQ 机器人',
+        }, h(QrActionIcon), adding ? '正在接入' : '扫码接入机器人'),
+        h(Button, {
+          kind: 'credential',
+          className: 'dim-credentialButton',
+          onClick: onCredential,
+          disabled: adding || busy,
+          'aria-pressed': credentialOpen,
+          'aria-label': '使用 AppID 和 AppSecret 绑定 QQ 机器人',
+        }, h(CredentialActionIcon), credentialOpen ? '收起凭据' : '手动接入')),
       totals.configured > 0
         ? h('div', { className: 'ddt-badge dim-onlineBadge' },
             h('span', null, `${totals.connected} / ${totals.configured} 在线`))
@@ -138,6 +149,7 @@ function RemoveConfirmation({ account, busy, onConfirm, onCancel }) {
 export function AccountCard({ account, busy, removing, onReconnect, onRequestRemove, onConfirmRemove, onCancelRemove }) {
   const tone = account.connected ? 'success' : account.state === 'error' ? 'error' : 'warning';
   const stateLabel = account.connected ? '运行正常' : account.state === 'connecting' ? '正在连接' : '连接未就绪';
+  const summary = account.error?.message ?? (account.connected ? null : account.health.summary);
   return h('article', { className: 'ddt-card dim-botCard', 'data-bot-id': account.botId },
     h('div', { className: 'ddt-cardBody dim-botCardBody' },
       h('div', { className: 'ddt-accountTop dim-botCardTop' },
@@ -151,7 +163,7 @@ export function AccountCard({ account, busy, removing, onReconnect, onRequestRem
         h('div', { className: 'ddt-metric dim-botMetric' }, h('dt', null, '消息通道'), h('dd', null, account.connected ? 'WebSocket 长连接' : '离线')),
         h('div', { className: 'ddt-metric dim-botMetric' }, h('dt', null, '最近检查'), h('dd', null, checkedTime(account.health.lastCheckedAt)))),
       h('div', { className: 'ddt-accountFooter dim-cardFooter' },
-        h('div', { className: 'ddt-summary dim-cardSummary' }, account.error?.message ?? account.health.summary),
+        summary ? h('div', { className: 'ddt-summary dim-cardSummary' }, summary) : null,
         h('div', { className: 'ddt-actions dim-cardActions' },
           h(Button, { className: 'dim-cardAction', onClick: onReconnect, disabled: Boolean(busy) }, busy === 'reconnect' ? '检查中…' : account.connected ? '检查连接' : '重试连接'),
           h(Button, { className: 'dim-cardAction', kind: 'danger', onClick: onRequestRemove, disabled: Boolean(busy) }, '移除接入')))),
@@ -166,6 +178,8 @@ export function QqSettingsTab({ rpcCall }) {
   const [busy, setBusy] = React.useState(false);
   const [busyByBot, setBusyByBot] = React.useState({});
   const [removeTarget, setRemoveTarget] = React.useState(null);
+  const [credentialOpen, setCredentialOpen] = React.useState(false);
+  const [credentialError, setCredentialError] = React.useState(null);
   const [now, setNow] = React.useState(Date.now());
   const mounted = React.useRef(true);
   const addButtonRef = React.useRef(null);
@@ -225,6 +239,8 @@ export function QqSettingsTab({ rpcCall }) {
   }, [provision?.attemptId, provision?.status]);
 
   const startProvisioning = React.useCallback(async (replace = false) => {
+    setCredentialOpen(false);
+    setCredentialError(null);
     setBusy(true);
     try {
       if (replace && provision?.attemptId) await invoke(QQ_ENDPOINTS.cancelProvisioning, { attemptId: provision.attemptId });
@@ -240,6 +256,24 @@ export function QqSettingsTab({ rpcCall }) {
       if (mounted.current) setBusy(false);
     }
   }, [invoke, provision?.attemptId]);
+
+  const bindCredentials = React.useCallback(async ({ identity, secret }) => {
+    setBusy(true);
+    setCredentialError(null);
+    try {
+      const snapshot = normalizeSnapshot(await invoke(
+        QQ_ENDPOINTS.bindCredentials,
+        { appId: identity, appSecret: secret },
+      ));
+      if (!mounted.current) return;
+      setModel({ phase: 'ready', bots: snapshot.bots, totals: snapshot.totals, error: null });
+      setCredentialOpen(false);
+    } catch (error) {
+      if (mounted.current) setCredentialError(presentError(error));
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  }, [invoke]);
 
   const closeProvision = React.useCallback(async () => {
     setBusy(true);
@@ -308,7 +342,7 @@ export function QqSettingsTab({ rpcCall }) {
   const botList = model.bots.length > 0
     ? h('section', { className: 'dim-listSection' },
         h('div', { className: 'ddt-listHeading dim-listHeading' },
-          h('h3', null, '已绑定的 QQ 机器人'), h('span', null, `${model.bots.length} 个`)),
+          h('h3', null, '已绑定的 QQ 机器人')),
         h('ul', { className: 'ddt-list dim-botList' }, model.bots.map((account) =>
           h('li', { key: account.botId }, h(AccountCard, {
             account,
@@ -324,14 +358,38 @@ export function QqSettingsTab({ rpcCall }) {
           })))))
     : null;
 
+  const credentialView = credentialOpen
+    ? h(CredentialBindingPanel, {
+        channel: 'QQ',
+        identityLabel: 'AppID',
+        identityPlaceholder: '填写 QQ 开放平台 AppID',
+        secretLabel: 'AppSecret',
+        secretPlaceholder: '填写 QQ 开放平台 AppSecret',
+        busy,
+        error: credentialError,
+        onSubmit: bindCredentials,
+        onCancel: () => { setCredentialOpen(false); setCredentialError(null); },
+      })
+    : null;
+
   return h('section', { className: 'ddt-page dqq-page dim-channelPage', 'aria-label': 'QQ 设置' },
-    h(Heading, { totals: model.totals, adding: Boolean(provision), busy, onAdd: () => void startProvisioning(), addButtonRef }),
+    h(Heading, {
+      totals: model.totals,
+      adding: Boolean(provision),
+      busy,
+      onAdd: () => void startProvisioning(),
+      onCredential: () => { setCredentialOpen((value) => !value); setCredentialError(null); },
+      credentialOpen,
+      addButtonRef,
+    }),
     model.phase === 'loading' ? h(LoadingView)
       : model.phase === 'error'
         ? h('div', { className: 'ddt-card dim-surfaceCard' }, h('div', { className: 'ddt-inlineError dim-inlineError' }, h('h3', null, '无法读取 QQ 机器人状态'), h('p', null, model.error?.message), h(Button, { onClick: () => void loadStatus() }, '重新读取')))
         : h(React.Fragment, null,
+            credentialView,
             provisionView,
-            model.bots.length === 0 && !provision ? h(EmptyView, { busy, onStart: () => void startProvisioning() }) : null,
+            model.bots.length === 0 && !provision && !credentialOpen
+              ? h(EmptyView, { busy, onStart: () => void startProvisioning() }) : null,
             botList));
 }
 

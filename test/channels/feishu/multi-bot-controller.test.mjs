@@ -143,6 +143,23 @@ async function completeScan(fx, result) {
   return fx.controller.registrationStatus(attemptId);
 }
 
+test('manual Feishu credentials are verified, stored host-side, and use app visibility for access', async () => {
+  const fx = fixture({ createBotIds: ['bot_manual'] });
+
+  const status = await fx.controller.bindCredentials({
+    appId: 'cli_manual',
+    appSecret: 'manual-private-secret',
+  });
+
+  assert.equal(status.totals.connected, 1);
+  assert.equal(fx.configStore.bots.length, 1);
+  assert.deepEqual(fx.configStore.bots[0].ownerOpenIds, ['*']);
+  assert.equal(fx.values.get(fx.configStore.bots[0].secretRef), 'manual-private-secret');
+  assert.equal(fx.runtimes.get('bot_manual')[0].appSecret, 'manual-private-secret');
+  assert.doesNotMatch(JSON.stringify(status), /manual-private-secret|ownerOpenIds|secretRef/);
+  await fx.controller.close();
+});
+
 test('initialization isolates failures and starts every bot with available credentials', async () => {
   const missing = bot('bot_missing', 'missing');
   const healthy = bot('bot_healthy', 'healthy');

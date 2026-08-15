@@ -6,6 +6,7 @@ export const DINGTALK_ENDPOINTS = Object.freeze({
   beginProvisioning: 'provision.begin',
   pollProvisioning: 'provision.poll',
   cancelProvisioning: 'provision.cancel',
+  bindCredentials: 'bot.bind-credentials',
   reconnectBot: 'bot.reconnect',
   deleteBot: 'bot.delete',
   approveSender: 'bot.sender.approve',
@@ -38,6 +39,10 @@ function validId(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 }
 
+function validCredential(value, maxLength) {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= maxLength;
+}
+
 function payloadFailure(endpoint, payload) {
   if (!isRecord(payload)) return 'Payload must be an object.';
   if (endpoint === DINGTALK_ENDPOINTS.status) {
@@ -52,6 +57,13 @@ function payloadFailure(endpoint, payload) {
     return exactKeys(payload, ['attemptId']) && validId(payload.attemptId)
       ? null
       : `${endpoint} requires an attemptId.`;
+  }
+  if (endpoint === DINGTALK_ENDPOINTS.bindCredentials) {
+    return exactKeys(payload, ['clientId', 'clientSecret'])
+      && validCredential(payload.clientId, 256)
+      && validCredential(payload.clientSecret, 1024)
+      ? null
+      : 'bot.bind-credentials requires Client ID and Client Secret.';
   }
   if (endpoint === DINGTALK_ENDPOINTS.reconnectBot) {
     return exactKeys(payload, ['botId']) && validId(payload.botId)
@@ -138,6 +150,7 @@ function assertController(controller) {
     'startProvisioning',
     'registrationStatus',
     'cancelProvisioning',
+    'bindCredentials',
     'reconnectBot',
     'deleteBot',
     'approveSender',
@@ -187,6 +200,8 @@ export function createDingtalkRpcHandler(controller, { encodeQr = qrDataUrl } = 
         value = await controller.cancelProvisioning(payload.attemptId);
         if (!value) return badRequest('The provisioning attempt no longer exists.');
         value = sanitizePublic(value);
+      } else if (endpoint === DINGTALK_ENDPOINTS.bindCredentials) {
+        value = await publicStatus(await controller.bindCredentials(payload), cachedEncode);
       } else if (endpoint === DINGTALK_ENDPOINTS.reconnectBot) {
         value = await publicStatus(await controller.reconnectBot(payload.botId), cachedEncode);
       } else if (endpoint === DINGTALK_ENDPOINTS.deleteBot) {

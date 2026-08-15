@@ -87,7 +87,7 @@ export class QqHarnessBridge {
 
     this.#status.messagesReceived += 1;
     this.#status.lastMessageAt = new Date().toISOString();
-    if (sender !== this.#ownerUserOpenid) {
+    if (this.#ownerUserOpenid !== '*' && sender !== this.#ownerUserOpenid) {
       this.#status.messagesRejected += 1;
       this.#status.lastRejectedAt = new Date().toISOString();
       return;

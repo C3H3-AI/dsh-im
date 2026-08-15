@@ -45,6 +45,7 @@ export function isBotSender(event) {
 
 export function isAllowedSender(event, allowedOpenIds) {
   if (!allowedOpenIds || allowedOpenIds.size === 0) return false;
+  if (allowedOpenIds.has('*')) return true;
   const senderOpenId = event?.sender?.sender_id?.open_id;
   return typeof senderOpenId === 'string' && allowedOpenIds.has(senderOpenId);
 }

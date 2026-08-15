@@ -79,3 +79,25 @@ test('QQ bridge accepts only the scanner and requires an at-message event in gro
   assert.equal(asks, 0);
   assert.equal(bridge.status.messagesRejected, 1);
 });
+
+test('QQ credential-bound bots accept senders within the platform visibility scope', async () => {
+  let asks = 0;
+  const bridge = new QqHarnessBridge({
+    bot: { sendText: async () => {} },
+    ownerUserOpenid: '*',
+    harness: {
+      sessionExists: async () => true,
+      ask: async () => { asks += 1; return 'ok'; },
+    },
+    state: {
+      hasSeen: () => false,
+      markSeen: async () => {},
+      sessionFor: () => 'session',
+      setSession: async () => {},
+      clearSession: async () => {},
+    },
+  });
+  await bridge.accept(message({ messageId: 'visible', senderId: 'visible-user' }));
+  assert.equal(asks, 1);
+  assert.equal(bridge.status.messagesRejected, 0);
+});

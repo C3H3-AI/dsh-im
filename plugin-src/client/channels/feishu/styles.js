@@ -386,7 +386,6 @@ const CSS = String.raw`
 .bxf-listSection { display: flex; flex-direction: column; gap: 10px; }
 .bxf-listHeading { min-height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 2px; }
 .bxf-listHeading h3 { font-size: 14px; line-height: 22px; font-weight: 650; margin: 0; }
-.bxf-listHeading span { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 12px; }
 .bxf-botList { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .bxf-botList > li { min-width: 0; }
 .bxf-botCard:focus { outline: none; }

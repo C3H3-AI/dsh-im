@@ -1,5 +1,6 @@
 import * as React from 'react';
 
+import { CredentialActionIcon, CredentialBindingPanel, QrActionIcon } from '../../credential-binding.js';
 import {
   DINGTALK_ENDPOINTS,
   DINGTALK_RPC_CHANNEL,
@@ -46,20 +47,30 @@ const Button = React.forwardRef(function Button(
   }, children);
 });
 
-function Heading({ totals, adding, busy, onAdd, addButtonRef }) {
+function Heading({ totals, adding, busy, onAdd, onCredential, credentialOpen, addButtonRef }) {
   return h('div', { className: 'ddt-heading' },
     h('div', { className: 'ddt-headingCopy' },
       h('div', { className: 'ddt-eyebrow' }, 'Channel'),
       h('h2', null, '钉钉机器人'),
       h('p', null, '通过扫码把钉钉机器人接入 DeepSeek Harness')),
     h('div', { className: 'ddt-tools' },
-      h(Button, {
-        kind: 'primary',
-        className: 'dim-scanButton',
-        onClick: onAdd,
-        disabled: adding || busy,
-        ref: addButtonRef,
-      }, adding ? '正在接入' : '扫码接入钉钉'),
+      h('div', { className: 'dim-bindActions' },
+        h(Button, {
+          kind: 'primary',
+          className: 'dim-scanButton',
+          onClick: onAdd,
+          disabled: adding || busy,
+          ref: addButtonRef,
+          'aria-label': '扫码接入钉钉机器人',
+        }, h(QrActionIcon), adding ? '正在接入' : '扫码接入机器人'),
+        h(Button, {
+          kind: 'credential',
+          className: 'dim-credentialButton',
+          onClick: onCredential,
+          disabled: adding || busy,
+          'aria-pressed': credentialOpen,
+          'aria-label': '使用 Client ID 和 Client Secret 绑定钉钉机器人',
+        }, h(CredentialActionIcon), credentialOpen ? '收起凭据' : '手动接入')),
       totals.configured > 0
         ? h('div', { className: 'ddt-badge dim-onlineBadge' },
             h('span', null, `${totals.connected} / ${totals.configured} 在线`))
@@ -204,6 +215,7 @@ export function AccountCard({
   const state = busy === 'reconnect' ? 'connecting' : account.state;
   const tone = account.connected ? 'success' : state === 'error' ? 'error' : 'warning';
   const stateLabel = account.connected ? '运行正常' : state === 'connecting' ? '正在连接' : '连接未就绪';
+  const summary = account.error?.message ?? (account.connected ? null : account.health.summary);
   return h('article', { className: 'ddt-card dim-botCard', tabIndex: -1, 'data-bot-id': account.botId },
     h('div', { className: 'ddt-cardBody dim-botCardBody' },
       h('div', { className: 'ddt-accountTop dim-botCardTop' },
@@ -220,7 +232,7 @@ export function AccountCard({
         h('div', { className: 'ddt-metric dim-botMetric' }, h('dt', null, '最近检查'),
           h('dd', null, checkedTime(account.health.lastCheckedAt)))),
       h('div', { className: 'ddt-accountFooter dim-cardFooter' },
-        h('div', { className: 'ddt-summary dim-cardSummary' }, account.error?.message ?? account.health.summary),
+        summary ? h('div', { className: 'ddt-summary dim-cardSummary' }, summary) : null,
         h('div', { className: 'ddt-actions dim-cardActions' },
           h(Button, { className: 'dim-cardAction', onClick: onReconnect, disabled: Boolean(busy) },
             busy === 'reconnect' ? '检查中…' : account.connected ? '检查连接' : '重试连接'),
@@ -237,7 +249,7 @@ export function AccountCard({
 function AccountList(props) {
   return h('section', { className: 'dim-listSection' },
     h('div', { className: 'ddt-listHeading dim-listHeading' },
-      h('h3', null, '已接入的钉钉机器人'), h('span', null, `${props.bots.length} 个`)),
+      h('h3', null, '已接入的钉钉机器人')),
     h('ul', { className: 'ddt-list dim-botList' }, props.bots.map((account) => h('li', { key: account.botId },
       h(AccountCard, {
         account,
@@ -260,6 +272,8 @@ export function DingtalkSettingsTab({ rpcCall }) {
   const [busy, setBusy] = React.useState(false);
   const [busyByBot, setBusyByBot] = React.useState({});
   const [removeTarget, setRemoveTarget] = React.useState(null);
+  const [credentialOpen, setCredentialOpen] = React.useState(false);
+  const [credentialError, setCredentialError] = React.useState(null);
   const [notice, setNotice] = React.useState('');
   const [now, setNow] = React.useState(() => Date.now());
   const addButtonRef = React.useRef(null);
@@ -397,6 +411,8 @@ export function DingtalkSettingsTab({ rpcCall }) {
 
   const startProvisioning = React.useCallback(async ({ replace = false } = {}) => {
     if (!mountedRef.current) return;
+    setCredentialOpen(false);
+    setCredentialError(null);
     setBusy(true);
     try {
       if (replace && provision?.attemptId) {
@@ -431,6 +447,32 @@ export function DingtalkSettingsTab({ rpcCall }) {
       if (mountedRef.current) setBusy(false);
     }
   }, [announce, invoke, provision?.attemptId]);
+
+  const bindCredentials = React.useCallback(async ({ identity, secret }) => {
+    if (!mountedRef.current) return;
+    setBusy(true);
+    setCredentialError(null);
+    try {
+      const snapshot = normalizeSnapshot(await invoke(
+        DINGTALK_ENDPOINTS.bindCredentials,
+        { clientId: identity, clientSecret: secret },
+      ));
+      if (!mountedRef.current) return;
+      setModel({
+        phase: 'ready',
+        bots: snapshot.bots,
+        totals: snapshot.totals,
+        revision: snapshot.revision,
+        error: null,
+      });
+      setCredentialOpen(false);
+      announce('钉钉机器人凭据已绑定。');
+    } catch (error) {
+      if (mountedRef.current) setCredentialError(presentError(error));
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  }, [announce, invoke]);
 
   const cancelProvisioning = React.useCallback(async () => {
     if (!mountedRef.current) return;
@@ -598,12 +640,28 @@ export function DingtalkSettingsTab({ rpcCall }) {
     });
   }
 
+  const credentialView = credentialOpen
+    ? h(CredentialBindingPanel, {
+        channel: '钉钉',
+        identityLabel: 'Client ID',
+        identityPlaceholder: '填写钉钉应用 Client ID',
+        secretLabel: 'Client Secret',
+        secretPlaceholder: '填写钉钉应用 Client Secret',
+        busy,
+        error: credentialError,
+        onSubmit: bindCredentials,
+        onCancel: () => { setCredentialOpen(false); setCredentialError(null); },
+      })
+    : null;
+
   return h('section', { className: 'ddt-page dim-channelPage', 'aria-label': '钉钉设置' },
     h(Heading, {
       totals: model.totals,
       adding: Boolean(provision),
       busy,
       onAdd: () => void startProvisioning(),
+      onCredential: () => { setCredentialOpen((value) => !value); setCredentialError(null); },
+      credentialOpen,
       addButtonRef,
     }),
     h('div', { className: 'ddt-visuallyHidden', role: 'status', 'aria-live': 'polite' }, notice),
@@ -619,8 +677,9 @@ export function DingtalkSettingsTab({ rpcCall }) {
               h('p', null, model.error?.message ?? '请稍后重试'),
               h(Button, { onClick: () => void loadStatus() }, '重新读取')))
         : h(React.Fragment, null,
+            credentialView,
             provisionView,
-            model.bots.length === 0 && !provision
+            model.bots.length === 0 && !provision && !credentialOpen
               ? h(EmptyView, { busy, onStart: () => void startProvisioning() })
               : null,
             model.bots.length > 0

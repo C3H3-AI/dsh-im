@@ -15,7 +15,8 @@ test('Enterprise WeChat settings uses the shared compact channel toolbar', () =>
   }));
   assert.match(markup, /class="ddt-page dwecom-page dim-channelPage"/);
   assert.match(markup, /class="ddt-button dim-scanButton"/);
-  assert.match(markup, />扫码绑定企业微信机器人</);
+  assert.match(markup, /aria-label="扫码接入企业微信机器人"/);
+  assert.match(markup, /class="dim-actionIcon"[^]*扫码接入机器人/);
   assert.doesNotMatch(markup, /凭据仅保存在本机|role="switch"|type="checkbox"/);
 });
 
@@ -39,5 +40,5 @@ test('Enterprise WeChat bot cards match the shared two-metric card treatment', (
   assert.equal((markup.match(/class="ddt-metric dim-botMetric"/g) ?? []).length, 2);
   assert.match(markup, />消息通道<[^]*>最近检查</);
   assert.match(markup, />检查连接<[^]*>移除接入</);
-  assert.doesNotMatch(markup, /收到\s*\/\s*回复/);
+  assert.doesNotMatch(markup, /收到\s*\/\s*回复|dim-cardSummary|企业微信 WebSocket 长连接运行正常/);
 });
