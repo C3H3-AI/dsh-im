@@ -26,6 +26,12 @@
 npx -y github:xmanrui/dsh-im install
 ```
 
+也可以直接从 npm 安装：
+
+```sh
+dsh plugin --profile web add @xmanrui/dsh-im
+```
+
 重启 `dsh web`，然后打开「设置 → 插件 → IM机器人」。安装器会用 `dsh-im` 替换 profile 中直接安装的 `dsh-feishu`、`dsh-weixin` 和 `dsh-dingtalk`，但不删除任何渠道数据；原有渠道凭据和扫码绑定会继续使用。
 
 飞书、QQ、钉钉和企业微信页面都提供两种入口：带二维码图标的蓝色「扫码接入机器人」按钮走平台官方扫码流程，右侧带钥匙图标的白色描边「手动接入」按钮连接已经创建的机器人应用。飞书和 QQ 分别填写 App ID + App Secret、AppID + AppSecret；钉钉填写官方 Client ID + Client Secret；企业微信填写官方 Bot ID + Secret。Secret 只提交给本机 Harness Host，并写入受保护的凭据存储；状态接口和机器人列表不会回传 Secret。
@@ -96,6 +102,12 @@ Other IM platforms can be added through the same channel-adapter structure.
 
 ```sh
 npx -y github:xmanrui/dsh-im install
+```
+
+Alternatively, install it directly from npm:
+
+```sh
+dsh plugin --profile web add @xmanrui/dsh-im
 ```
 
 Restart `dsh web`, then open **Settings → Plugins → IM Bot**. The installer replaces directly installed `dsh-feishu`, `dsh-weixin`, and `dsh-dingtalk` entries in the profile with `dsh-im` without deleting channel data.
