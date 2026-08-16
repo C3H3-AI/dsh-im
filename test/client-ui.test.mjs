@@ -105,9 +105,10 @@ test('IM settings renders eight compact logo channel tabs without enable switche
   assert.doesNotMatch(markup, />INSTANT MESSAGING<|>Channel<|>微信设置</);
 });
 
-test('the DingTalk QR card stacks within the narrow combined-channel panel', async () => {
+test('shared QR cards stay square and stack within the narrow combined-channel panel', async () => {
   const styles = await readFile(STYLES_URL, 'utf8');
   assert.match(styles, /\.dim-panel \{ min-width: 0; container-type: inline-size; \}/);
+  assert.match(styles, /\.dim-panel \.dim-qrFrame \{[^}]*width: min\(270px, 100%\);[^}]*height: auto;[^}]*aspect-ratio: 1;/);
   assert.match(
     styles,
     /@container \(max-width: 680px\)[\s\S]*\.dim-panel \.ddt-qrLayout \{ grid-template-columns: minmax\(0, 1fr\); justify-items: center;/,
