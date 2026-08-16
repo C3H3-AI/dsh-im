@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { createImHostPlugin, inject, name } from '../plugin-src/host/index.mjs';
 
-test('Host composes Feishu, Weixin, DingTalk, Enterprise WeChat, and QQ inside one plugin context', async () => {
+test('Host composes all seven IM channels inside one plugin context', async () => {
   const calls = [];
   const plugin = createImHostPlugin({
     applyFeishu: async (ctx, config) => calls.push(['feishu', ctx, config]),
@@ -11,14 +11,19 @@ test('Host composes Feishu, Weixin, DingTalk, Enterprise WeChat, and QQ inside o
     applyDingtalk: async (ctx, config) => calls.push(['dingtalk', ctx, config]),
     applyWecom: async (ctx, config) => calls.push(['wecom', ctx, config]),
     applyQq: async (ctx, config) => calls.push(['qq', ctx, config]),
+    applyTelegram: async (ctx, config) => calls.push(['telegram', ctx, config]),
+    applyDiscord: async (ctx, config) => calls.push(['discord', ctx, config]),
   });
   const ctx = { marker: 'shared-context' };
   const config = {
+    rpcAuthority: 'trusted-host',
     feishu: { domain: 'feishu' },
     weixin: { timeout: 30 },
     dingtalk: { replyTimeoutMs: 60_000 },
     wecom: { replyTimeoutMs: 60_000 },
     qq: { replyTimeoutMs: 60_000 },
+    telegram: { replyTimeoutMs: 60_000 },
+    discord: { replyTimeoutMs: 60_000 },
   };
 
   await plugin.apply(ctx, config);
@@ -26,11 +31,13 @@ test('Host composes Feishu, Weixin, DingTalk, Enterprise WeChat, and QQ inside o
   assert.equal(name, 'dsh-im-host');
   assert.deepEqual(inject, ['connection', 'credentials', 'webServer']);
   assert.deepEqual(calls, [
-    ['feishu', ctx, config.feishu],
-    ['weixin', ctx, config.weixin],
-    ['dingtalk', ctx, config.dingtalk],
-    ['wecom', ctx, config.wecom],
-    ['qq', ctx, config.qq],
+    ['feishu', ctx, { ...config.feishu, rpcAuthority: 'trusted-host' }],
+    ['weixin', ctx, { ...config.weixin, rpcAuthority: 'trusted-host' }],
+    ['dingtalk', ctx, { ...config.dingtalk, rpcAuthority: 'trusted-host' }],
+    ['wecom', ctx, { ...config.wecom, rpcAuthority: 'trusted-host' }],
+    ['qq', ctx, { ...config.qq, rpcAuthority: 'trusted-host' }],
+    ['telegram', ctx, { ...config.telegram, rpcAuthority: 'trusted-host' }],
+    ['discord', ctx, { ...config.discord, rpcAuthority: 'trusted-host' }],
   ]);
 });
 

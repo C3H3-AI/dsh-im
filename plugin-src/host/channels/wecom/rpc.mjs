@@ -1,4 +1,5 @@
 import QRCode from 'qrcode';
+import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 
 export const WECOM_RPC_CHANNEL = '/wecom';
 export const WECOM_ENDPOINTS = Object.freeze({
@@ -138,13 +139,13 @@ export function createWecomRpcHandler(controller, { encodeQr = qrDataUrl } = {})
   };
 }
 
-export function installWecomRpc(ctx, controller, options) {
+export function installWecomRpc(ctx, controller, options, authority) {
   if (!ctx?.connection?.rpc || typeof ctx.connection.rpc.handle !== 'function') {
     throw new TypeError('DSH Host Connection RPC is required');
   }
   return ctx.connection.rpc.handle(
     WECOM_RPC_CHANNEL,
     createWecomRpcHandler(controller, options),
-    { authority: 'loopback' },
+    { authority: resolveRpcAuthority(authority) },
   );
 }

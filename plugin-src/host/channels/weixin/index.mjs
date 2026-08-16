@@ -5,10 +5,17 @@ export const name = 'dsh-weixin-host';
 export const inject = ['connection', 'credentials', 'webServer'];
 
 export async function apply(ctx, config = {}) {
-  if (config?.controller) return installWeixinRpc(ctx, config.controller, config.rpcOptions);
+  if (config?.controller) {
+    return installWeixinRpc(ctx, config.controller, config.rpcOptions, config.rpcAuthority);
+  }
 
   const production = await createProductionController(ctx, config, config.internals);
-  const disposeRpc = installWeixinRpc(ctx, production.controller, config.rpcOptions);
+  const disposeRpc = installWeixinRpc(
+    ctx,
+    production.controller,
+    config.rpcOptions,
+    config.rpcAuthority,
+  );
   ctx.effect(() => async () => {
     await production.close();
   }, 'dsh-weixin: close account connections');

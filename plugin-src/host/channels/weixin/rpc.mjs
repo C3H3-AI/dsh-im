@@ -1,4 +1,5 @@
 import QRCode from 'qrcode';
+import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 
 export const WEIXIN_RPC_CHANNEL = '/weixin';
 export const WEIXIN_ENDPOINTS = Object.freeze({
@@ -165,13 +166,13 @@ export function createWeixinRpcHandler(controller, { encodeQr = qrDataUrl } = {}
   };
 }
 
-export function installWeixinRpc(ctx, controller, options) {
+export function installWeixinRpc(ctx, controller, options, authority) {
   if (!ctx?.connection?.rpc || typeof ctx.connection.rpc.handle !== 'function') {
     throw new TypeError('DSH Host Connection RPC is required');
   }
   return ctx.connection.rpc.handle(
     WEIXIN_RPC_CHANNEL,
     createWeixinRpcHandler(controller, options),
-    { authority: 'loopback' },
+    { authority: resolveRpcAuthority(authority) },
   );
 }

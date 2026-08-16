@@ -52,12 +52,13 @@ export function CredentialBindingPanel({
   const [identity, setIdentity] = React.useState('');
   const [secret, setSecret] = React.useState('');
   const headingId = React.useId();
+  const hasIdentity = Boolean(identityLabel);
 
   const submit = (event) => {
     event.preventDefault();
     const normalizedIdentity = identity.trim();
     const normalizedSecret = secret.trim();
-    if (!normalizedIdentity || !normalizedSecret || busy) return;
+    if ((hasIdentity && !normalizedIdentity) || !normalizedSecret || busy) return;
     void onSubmit?.({ identity: normalizedIdentity, secret: normalizedSecret });
   };
 
@@ -66,8 +67,11 @@ export function CredentialBindingPanel({
     'aria-labelledby': headingId,
   },
   h('h3', { id: headingId, className: 'dim-credentialTitle' }, `手动接入${channel}机器人`),
-  h('form', { className: 'dim-credentialForm', onSubmit: submit },
-    h('label', { className: 'dim-credentialField' },
+  h('form', {
+    className: `dim-credentialForm${hasIdentity ? '' : ' dim-credentialFormSingle'}`,
+    onSubmit: submit,
+  },
+    hasIdentity ? h('label', { className: 'dim-credentialField' },
       h('span', null, identityLabel),
       h('input', {
         value: identity,
@@ -80,7 +84,7 @@ export function CredentialBindingPanel({
         autoComplete: 'off',
         disabled: busy,
         required: true,
-      })),
+      })) : null,
     h('label', { className: 'dim-credentialField' },
       h('span', null, secretLabel),
       h('input', {
@@ -102,7 +106,7 @@ export function CredentialBindingPanel({
         type: 'submit',
         className: 'ddt-button',
         'data-kind': 'primary',
-        disabled: busy || !identity.trim() || !secret.trim(),
+        disabled: busy || (hasIdentity && !identity.trim()) || !secret.trim(),
       }, busy ? '正在绑定…' : '绑定并连接'),
       h('button', {
         type: 'button',

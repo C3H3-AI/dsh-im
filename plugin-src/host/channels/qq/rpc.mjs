@@ -1,4 +1,5 @@
 import QRCode from 'qrcode';
+import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 
 export const QQ_RPC_CHANNEL = '/qq';
 export const QQ_ENDPOINTS = Object.freeze({
@@ -133,9 +134,13 @@ export function createQqRpcHandler(controller, { encodeQr = qrDataUrl } = {}) {
   };
 }
 
-export function installQqRpc(ctx, controller, options) {
+export function installQqRpc(ctx, controller, options, authority) {
   if (!ctx?.connection?.rpc || typeof ctx.connection.rpc.handle !== 'function') {
     throw new TypeError('DSH Host Connection RPC is required');
   }
-  return ctx.connection.rpc.handle(QQ_RPC_CHANNEL, createQqRpcHandler(controller, options), { authority: 'loopback' });
+  return ctx.connection.rpc.handle(
+    QQ_RPC_CHANNEL,
+    createQqRpcHandler(controller, options),
+    { authority: resolveRpcAuthority(authority) },
+  );
 }

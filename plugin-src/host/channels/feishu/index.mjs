@@ -24,10 +24,17 @@ function controllerFrom(ctx, config) {
  */
 export async function apply(ctx, config = {}) {
   const controller = controllerFrom(ctx, config);
-  if (controller) return installFeishuRpc(ctx, controller);
+  if (controller) {
+    return installFeishuRpc(ctx, controller, config.rpcOptions, config.rpcAuthority);
+  }
 
   const production = await createProductionController(ctx, config);
-  const disposeRpc = installFeishuRpc(ctx, production.controller);
+  const disposeRpc = installFeishuRpc(
+    ctx,
+    production.controller,
+    config.rpcOptions,
+    config.rpcAuthority,
+  );
   ctx.effect(() => async () => {
     await production.close();
   }, 'dsh-feishu: close controller and live connection');

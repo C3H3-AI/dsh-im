@@ -1,4 +1,5 @@
 import QRCode from 'qrcode';
+import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 import {
   FEISHU_ENDPOINTS,
   FEISHU_RPC_CHANNEL,
@@ -440,14 +441,14 @@ export function createFeishuRpcHandler(controller, { encodeQr = qrCodeDataUrl } 
   };
 }
 
-/** Register the loopback-only `/feishu` logical channel. */
-export function installFeishuRpc(ctx, controller, options) {
+/** Register the `/feishu` logical channel with its configured browser authority. */
+export function installFeishuRpc(ctx, controller, options, authority) {
   if (!ctx?.connection?.rpc || typeof ctx.connection.rpc.handle !== 'function') {
     throw new TypeError('DSH Host Connection RPC is required');
   }
   return ctx.connection.rpc.handle(
     FEISHU_RPC_CHANNEL,
     createFeishuRpcHandler(controller, options),
-    { authority: 'loopback' },
+    { authority: resolveRpcAuthority(authority) },
   );
 }

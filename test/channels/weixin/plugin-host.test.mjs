@@ -57,6 +57,21 @@ test('Host plugin registers the Weixin RPC channel as loopback-only', async () =
   assert.deepEqual(registration.options, { authority: 'loopback' });
 });
 
+test('Host plugin opts the Weixin RPC channel into trusted Host authorities', async () => {
+  let registration;
+  const ctx = {
+    connection: { rpc: { handle: (channel, handler, options) => {
+      registration = { channel, handler, options };
+      return async () => {};
+    } } },
+  };
+  await apply(ctx, {
+    controller: controllerFixture(),
+    rpcAuthority: 'trusted-host',
+  });
+  assert.deepEqual(registration.options, { authority: 'trusted-host' });
+});
+
 test('RPC returns QR data and verification states without exposing secret-shaped fields', async () => {
   const controller = controllerFixture();
   const handler = createWeixinRpcHandler(controller, {

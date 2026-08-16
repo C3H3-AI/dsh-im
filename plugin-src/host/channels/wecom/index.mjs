@@ -5,9 +5,16 @@ export const name = 'dsh-im-wecom-host';
 export const inject = ['connection', 'credentials', 'webServer'];
 
 export async function apply(ctx, config = {}) {
-  if (config?.controller) return installWecomRpc(ctx, config.controller, config.rpcOptions);
+  if (config?.controller) {
+    return installWecomRpc(ctx, config.controller, config.rpcOptions, config.rpcAuthority);
+  }
   const production = await createProductionController(ctx, config, config.internals);
-  const disposeRpc = installWecomRpc(ctx, production.controller, config.rpcOptions);
+  const disposeRpc = installWecomRpc(
+    ctx,
+    production.controller,
+    config.rpcOptions,
+    config.rpcAuthority,
+  );
   ctx.effect(() => async () => production.close(), 'dsh-im: close Enterprise WeChat bot connections');
   return disposeRpc;
 }

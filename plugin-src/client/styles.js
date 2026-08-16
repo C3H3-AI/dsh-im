@@ -33,6 +33,10 @@ const CSS = String.raw`
 .dim-logoQq svg { width: 21px; height: 21px; }
 .dim-logoWecom { background: white; border: 1px solid var(--dsw-alias-line-border, #e5e6eb); }
 .dim-logoWecom svg { width: 22px; height: 22px; }
+.dim-logoTelegram { color: white; background: #229ed9; }
+.dim-logoTelegram svg { width: 21px; height: 21px; }
+.dim-logoDiscord { color: white; background: #5865f2; }
+.dim-logoDiscord svg { width: 21px; height: 21px; }
 .dim-channelCopy { min-width: 0; display: block; }
 .dim-channelCopy strong { overflow: hidden; color: inherit; font-size: 14px; line-height: 20px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
 .dim-divider { width: 1px; min-height: 520px; background: var(--dsw-alias-line-divider, #eef0f3); }
@@ -55,6 +59,7 @@ const CSS = String.raw`
 .dim-panel .dim-credentialPanel { display: grid; gap: 18px; padding: 20px; }
 .dim-panel .dim-credentialTitle { margin: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 17px; line-height: 1.35; font-weight: 650; }
 .dim-panel .dim-credentialForm { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px; }
+.dim-panel .dim-credentialFormSingle { grid-template-columns: minmax(0, 1fr); }
 .dim-panel .dim-credentialField { min-width: 0; display: grid; gap: 7px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: normal; font-weight: 560; }
 .dim-panel .dim-credentialField input { width: 100%; min-width: 0; height: 38px; padding: 0 11px; border: 1px solid var(--dsw-alias-line-border, #dfe1e5); border-radius: 8px; outline: none; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-body, #fff); font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; transition: border-color .16s ease, box-shadow .16s ease; }
 .dim-panel .dim-credentialField input:focus { border-color: #4e5969; box-shadow: 0 0 0 3px rgb(78 89 105 / 10%); }

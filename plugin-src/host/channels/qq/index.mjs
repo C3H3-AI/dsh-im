@@ -5,9 +5,16 @@ export const name = 'dsh-im-qq-host';
 export const inject = ['connection', 'credentials', 'webServer'];
 
 export async function apply(ctx, config = {}) {
-  if (config?.controller) return installQqRpc(ctx, config.controller, config.rpcOptions);
+  if (config?.controller) {
+    return installQqRpc(ctx, config.controller, config.rpcOptions, config.rpcAuthority);
+  }
   const production = await createProductionController(ctx, config, config.internals);
-  const disposeRpc = installQqRpc(ctx, production.controller, config.rpcOptions);
+  const disposeRpc = installQqRpc(
+    ctx,
+    production.controller,
+    config.rpcOptions,
+    config.rpcAuthority,
+  );
   ctx.effect(() => async () => production.close(), 'dsh-im: close QQ bot connections');
   return disposeRpc;
 }

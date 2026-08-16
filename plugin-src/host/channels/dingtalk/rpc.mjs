@@ -1,4 +1,5 @@
 import QRCode from 'qrcode';
+import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 
 export const DINGTALK_RPC_CHANNEL = '/dingtalk';
 export const DINGTALK_ENDPOINTS = Object.freeze({
@@ -224,13 +225,13 @@ export function createDingtalkRpcHandler(controller, { encodeQr = qrDataUrl } = 
   };
 }
 
-export function installDingtalkRpc(ctx, controller, options) {
+export function installDingtalkRpc(ctx, controller, options, authority) {
   if (!ctx?.connection?.rpc || typeof ctx.connection.rpc.handle !== 'function') {
     throw new TypeError('DSH Host Connection RPC is required');
   }
   return ctx.connection.rpc.handle(
     DINGTALK_RPC_CHANNEL,
     createDingtalkRpcHandler(controller, options),
-    { authority: 'loopback' },
+    { authority: resolveRpcAuthority(authority) },
   );
 }

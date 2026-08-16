@@ -10,6 +10,6 @@ This package depends on [`@larksuiteoapi/node-sdk`](https://github.com/larksuite
 
 QQ QR binding uses Tencent Connect's official [`@tencent-connect/qqbot-connector`](https://www.npmjs.com/package/@tencent-connect/qqbot-connector) 1.2.0 package as an external runtime dependency. Its npm metadata declares `UNLICENSED`; no connector source is copied into this project.
 
-This project is an independent DeepSeek Harness integration. It does not bundle OpenClaw and is not endorsed by Tencent, WeCom, Feishu, DingTalk, or QQ.
+This project is an independent DeepSeek Harness integration. It does not bundle OpenClaw and is not endorsed by Tencent, WeCom, Feishu, DingTalk, QQ, Telegram, or Discord.
 
-The WeChat and QQ marks use path data published by Simple Icons under the CC0 1.0 Universal license. The Feishu, DingTalk, and WeCom marks are inline vectors used for channel identification. Product names and logos remain trademarks of their respective owners.
+The WeChat, QQ, Telegram, and Discord marks use path data published by Simple Icons under the CC0 1.0 Universal license. The Feishu, DingTalk, and WeCom marks are inline vectors used for channel identification. Product names and logos remain trademarks of their respective owners.

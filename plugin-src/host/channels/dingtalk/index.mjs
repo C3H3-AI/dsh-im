@@ -5,10 +5,17 @@ export const name = 'dsh-dingtalk-host';
 export const inject = ['connection', 'credentials', 'webServer'];
 
 export async function apply(ctx, config = {}) {
-  if (config?.controller) return installDingtalkRpc(ctx, config.controller, config.rpcOptions);
+  if (config?.controller) {
+    return installDingtalkRpc(ctx, config.controller, config.rpcOptions, config.rpcAuthority);
+  }
 
   const production = await createProductionController(ctx, config, config.internals);
-  const disposeRpc = installDingtalkRpc(ctx, production.controller, config.rpcOptions);
+  const disposeRpc = installDingtalkRpc(
+    ctx,
+    production.controller,
+    config.rpcOptions,
+    config.rpcAuthority,
+  );
   ctx.effect(() => async () => {
     await production.close();
   }, 'dsh-dingtalk: close bot connections');
