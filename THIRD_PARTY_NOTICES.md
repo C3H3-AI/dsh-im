@@ -6,9 +6,9 @@ The DingTalk device-authorization request sequence and AI Card streaming protoco
 
 The WeCom QR-authorization request sequence is adapted from the official [`@wecom/wecom-openclaw-cli`](https://www.npmjs.com/package/@wecom/wecom-openclaw-cli) 1.1.0 package, whose npm metadata declares the ISC License. No CLI source or OpenClaw runtime is bundled in this package.
 
-The Host bundle includes [`@larksuiteoapi/node-sdk`](https://github.com/larksuite/node-sdk) 1.73.0 and its [`protobufjs`](https://github.com/protobufjs/protobuf.js) 7.6.5 runtime. The Lark SDK is licensed under the MIT License. protobufjs is licensed under the BSD 3-Clause License; both license texts are reproduced below.
+The Host bundle includes [`@larksuiteoapi/node-sdk`](https://github.com/larksuite/node-sdk) 1.73.0, [`@whiskeysockets/baileys`](https://github.com/WhiskeySockets/Baileys) 7.0.0-rc14, and their [`protobufjs`](https://github.com/protobufjs/protobuf.js) 7.6.5 runtime. The Lark SDK and Baileys are licensed under the MIT License. protobufjs is licensed under the BSD 3-Clause License; both license texts are reproduced below.
 
-This package depends at runtime on [`dingtalk-stream`](https://github.com/open-dingtalk/dingtalk-stream-sdk-nodejs) 2.1.4, [`@wecom/aibot-node-sdk`](https://github.com/WecomTeam/aibot-node-sdk) 1.0.7, [`@tencent-connect/qqbot-nodejs`](https://github.com/tencent-connect/qqbot) 1.0.4, [`@whiskeysockets/baileys`](https://github.com/WhiskeySockets/Baileys) 7.0.0-rc14, and [`qrcode`](https://github.com/soldair/node-qrcode) 1.5.4. These packages are licensed under the MIT License; `dingtalk-stream` is copyright 2023 钉钉开放平台团队.
+This package depends at runtime on [`dingtalk-stream`](https://github.com/open-dingtalk/dingtalk-stream-sdk-nodejs) 2.1.4, [`@wecom/aibot-node-sdk`](https://github.com/WecomTeam/aibot-node-sdk) 1.0.7, [`@tencent-connect/qqbot-nodejs`](https://github.com/tencent-connect/qqbot) 1.0.4, and [`qrcode`](https://github.com/soldair/node-qrcode) 1.5.4. These packages are licensed under the MIT License; `dingtalk-stream` is copyright 2023 钉钉开放平台团队.
 
 QQ QR binding uses Tencent Connect's official [`@tencent-connect/qqbot-connector`](https://www.npmjs.com/package/@tencent-connect/qqbot-connector) 1.2.0 package as an external runtime dependency. Its npm metadata declares `UNLICENSED`; no connector source is copied into this project.
 
