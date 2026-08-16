@@ -4,6 +4,8 @@
 
 通过扫码或已有机器人凭据把 IM 机器人接入 DeepSeek Harness。一个插件、一个设置入口，统一管理飞书、微信、钉钉、企业微信、QQ、Telegram、Discord 和 WhatsApp 机器人。
 
+Connect IM bots to DeepSeek Harness by scanning a QR code or entering existing bot credentials. One plugin and one settings entry provide unified management for Feishu, WeChat, DingTalk, WeCom, QQ, Telegram, Discord, and WhatsApp bots.
+
 ## 界面
 
 ![IM机器人页面](docs/images/imbot.png)
