@@ -1,7 +1,7 @@
 {
   "name": "@xmanrui/dsh-im",
   "version": "0.1.1",
-  "description": "通过扫码或机器人凭据把IM机器人接入DeepSeek Harness（支持飞书、微信、钉钉、企业微信、QQ、Telegram和Discord）。",
+  "description": "通过扫码或机器人凭据把IM机器人接入DeepSeek Harness（支持飞书、微信、钉钉、企业微信、QQ、Telegram、Discord和WhatsApp）。",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -60,6 +60,7 @@
     "@tencent-connect/qqbot-connector": "1.2.0",
     "@tencent-connect/qqbot-nodejs": "1.0.4",
     "@wecom/aibot-node-sdk": "1.0.7",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "dingtalk-stream": "2.1.4",
     "qrcode": "1.5.4"
   },

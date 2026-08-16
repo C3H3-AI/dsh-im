@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { createImHostPlugin, inject, name } from '../plugin-src/host/index.mjs';
 
-test('Host composes all seven IM channels inside one plugin context', async () => {
+test('Host composes all eight IM channels inside one plugin context', async () => {
   const calls = [];
   const plugin = createImHostPlugin({
     applyFeishu: async (ctx, config) => calls.push(['feishu', ctx, config]),
@@ -13,6 +13,7 @@ test('Host composes all seven IM channels inside one plugin context', async () =
     applyQq: async (ctx, config) => calls.push(['qq', ctx, config]),
     applyTelegram: async (ctx, config) => calls.push(['telegram', ctx, config]),
     applyDiscord: async (ctx, config) => calls.push(['discord', ctx, config]),
+    applyWhatsapp: async (ctx, config) => calls.push(['whatsapp', ctx, config]),
   });
   const ctx = { marker: 'shared-context' };
   const config = {
@@ -24,6 +25,7 @@ test('Host composes all seven IM channels inside one plugin context', async () =
     qq: { replyTimeoutMs: 60_000 },
     telegram: { replyTimeoutMs: 60_000 },
     discord: { replyTimeoutMs: 60_000 },
+    whatsapp: { replyTimeoutMs: 60_000 },
   };
 
   await plugin.apply(ctx, config);
@@ -38,6 +40,7 @@ test('Host composes all seven IM channels inside one plugin context', async () =
     ['qq', ctx, { ...config.qq, rpcAuthority: 'trusted-host' }],
     ['telegram', ctx, { ...config.telegram, rpcAuthority: 'trusted-host' }],
     ['discord', ctx, { ...config.discord, rpcAuthority: 'trusted-host' }],
+    ['whatsapp', ctx, { ...config.whatsapp, rpcAuthority: 'trusted-host' }],
   ]);
 });
 

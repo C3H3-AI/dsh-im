@@ -8,6 +8,7 @@ import {
   TelegramLogoGlyph,
   WecomLogoGlyph,
   WeixinLogoGlyph,
+  WhatsappLogoGlyph,
 } from './channel-logos.js';
 import { DINGTALK_RPC_CHANNEL } from './channels/dingtalk/api.js';
 import { DingtalkSettingsTab } from './channels/dingtalk/index.js';
@@ -29,6 +30,9 @@ import { installWecomStyles } from './channels/wecom/styles.js';
 import { WeixinSettingsTab } from './channels/weixin/index.js';
 import { WEIXIN_RPC_CHANNEL } from './channels/weixin/api.js';
 import { installWeixinStyles } from './channels/weixin/styles.js';
+import { WHATSAPP_RPC_CHANNEL } from './channels/whatsapp/api.js';
+import { WhatsappSettingsTab } from './channels/whatsapp/index.js';
+import { installWhatsappStyles } from './channels/whatsapp/styles.js';
 import { installImStyles } from './styles.js';
 
 const h = React.createElement;
@@ -44,6 +48,7 @@ const CHANNELS = Object.freeze([
   { id: 'qq', label: 'QQ' },
   { id: 'telegram', label: 'Telegram' },
   { id: 'discord', label: 'Discord' },
+  { id: 'whatsapp', label: 'WhatsApp' },
 ]);
 
 function WeixinLogo() {
@@ -79,6 +84,11 @@ function DiscordLogo() {
     h(DiscordLogoGlyph));
 }
 
+function WhatsappLogo() {
+  return h('span', { className: 'dim-logo dim-logoWhatsapp', 'aria-hidden': 'true' },
+    h(WhatsappLogoGlyph));
+}
+
 function ChannelLogo({ channel }) {
   if (channel === 'weixin') return h(WeixinLogo);
   if (channel === 'feishu') return h(FeishuLogo);
@@ -86,7 +96,8 @@ function ChannelLogo({ channel }) {
   if (channel === 'wecom') return h(WecomLogo);
   if (channel === 'qq') return h(QqLogo);
   if (channel === 'telegram') return h(TelegramLogo);
-  return h(DiscordLogo);
+  if (channel === 'discord') return h(DiscordLogo);
+  return h(WhatsappLogo);
 }
 
 export function IMSettingsTab({
@@ -97,6 +108,7 @@ export function IMSettingsTab({
   telegramRpcCall,
   wecomRpcCall,
   weixinRpcCall,
+  whatsappRpcCall,
 }) {
   const [selected, setSelected] = React.useState('weixin');
   const active = CHANNELS.find((channel) => channel.id === selected) ?? CHANNELS[0];
@@ -138,7 +150,9 @@ export function IMSettingsTab({
                 ? h(QqSettingsTab, { rpcCall: qqRpcCall })
                 : active.id === 'telegram'
                   ? h(TelegramSettingsTab, { rpcCall: telegramRpcCall })
-                  : h(DiscordSettingsTab, { rpcCall: discordRpcCall })),
+                  : active.id === 'discord'
+                    ? h(DiscordSettingsTab, { rpcCall: discordRpcCall })
+                    : h(WhatsappSettingsTab, { rpcCall: whatsappRpcCall })),
     ),
   );
 }
@@ -152,6 +166,7 @@ export function apply(ctx) {
       installQqStyles(),
       installTelegramStyles(),
       installDiscordStyles(),
+      installWhatsappStyles(),
       installImStyles(),
     ];
     return () => {
@@ -173,6 +188,8 @@ export function apply(ctx) {
     ctx.connection.rpc.call(TELEGRAM_RPC_CHANNEL, endpoint, payload, signal);
   const discordRpcCall = (endpoint, payload, signal) =>
     ctx.connection.rpc.call(DISCORD_RPC_CHANNEL, endpoint, payload, signal);
+  const whatsappRpcCall = (endpoint, payload, signal) =>
+    ctx.connection.rpc.call(WHATSAPP_RPC_CHANNEL, endpoint, payload, signal);
 
   ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
     name: 'settings.plugins.tab',
@@ -187,6 +204,7 @@ export function apply(ctx) {
       telegramRpcCall,
       wecomRpcCall,
       weixinRpcCall,
+      whatsappRpcCall,
     }),
   }, IMSettingsTab));
 }

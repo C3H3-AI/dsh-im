@@ -43,6 +43,13 @@ export function createTokenChannelSettings(definition) {
     emptyTitle,
     emptyDescription,
     platformLabel,
+    CredentialPanel = null,
+    credentialPayload = ({ secret }) => ({ token: secret }),
+    credentialAriaLabel = `使用 Bot Token 接入 ${channel} 机器人`,
+    credentialOpenLabel = '手动接入',
+    credentialCloseLabel = '收起凭据',
+    credentialNoun = 'Bot Token',
+    emptyActionLabel = '填写 Bot Token',
   } = definition;
 
   function AccountCard({ account, busy, removing, onReconnect, onRequestRemove, onConfirmRemove, onCancelRemove }) {
@@ -83,7 +90,7 @@ export function createTokenChannelSettings(definition) {
             }, '移除接入')))),
       removing ? h('div', { className: 'ddt-confirm dim-confirm', role: 'alertdialog' },
         h('strong', null, `从 DeepSeek Harness 移除“${account.bot.name}”？`),
-        h('p', null, `这会停止消息连接，并删除本机保存的 Bot Token、机器人配置及会话映射。${platformLabel}中的机器人不会被自动删除。`),
+        h('p', null, `这会停止消息连接，并删除本机保存的 ${credentialNoun}、机器人配置及会话映射。${platformLabel}中的机器人不会被自动删除。`),
         h('div', { className: 'ddt-actions dim-viewActions' },
           h(Button, { onClick: onCancelRemove, disabled: Boolean(busy) }, '保留机器人'),
           h(Button, { kind: 'danger', onClick: onConfirmRemove, disabled: Boolean(busy) },
@@ -153,11 +160,14 @@ export function createTokenChannelSettings(definition) {
       };
     }, [loadStatus, model.phase]);
 
-    const bindCredentials = React.useCallback(async ({ secret }) => {
+    const bindCredentials = React.useCallback(async (values) => {
       setBusy(true);
       setCredentialError(null);
       try {
-        const snapshot = api.normalizeSnapshot(await invoke(endpoints.bindCredentials, { token: secret }));
+        const snapshot = api.normalizeSnapshot(await invoke(
+          endpoints.bindCredentials,
+          credentialPayload(values),
+        ));
         if (!mounted.current) return;
         setModel({ phase: 'ready', bots: snapshot.bots, totals: snapshot.totals, error: null });
         setCredentialOpen(false);
@@ -224,8 +234,8 @@ export function createTokenChannelSettings(definition) {
             onClick: () => { setCredentialOpen((value) => !value); setCredentialError(null); },
             disabled: busy,
             'aria-pressed': credentialOpen,
-            'aria-label': `使用 Bot Token 接入 ${channel} 机器人`,
-          }, h(CredentialActionIcon), credentialOpen ? '收起凭据' : '手动接入')),
+            'aria-label': credentialAriaLabel,
+          }, h(CredentialActionIcon), credentialOpen ? credentialCloseLabel : credentialOpenLabel)),
         model.totals.configured > 0
           ? h('div', { className: 'ddt-badge dim-onlineBadge' },
               h('span', null, `${model.totals.connected} / ${model.totals.configured} 在线`))
@@ -242,15 +252,22 @@ export function createTokenChannelSettings(definition) {
               h('p', null, model.error?.message),
               h(Button, { onClick: () => void loadStatus() }, '重新读取')))
         : h(React.Fragment, null,
-            credentialOpen ? h(CredentialBindingPanel, {
-              channel,
-              secretLabel: 'Bot Token',
-              secretPlaceholder: tokenPlaceholder,
-              busy,
-              error: credentialError,
-              onSubmit: bindCredentials,
-              onCancel: () => { setCredentialOpen(false); setCredentialError(null); },
-            }) : null,
+            credentialOpen ? (CredentialPanel
+              ? h(CredentialPanel, {
+                  busy,
+                  error: credentialError,
+                  onSubmit: bindCredentials,
+                  onCancel: () => { setCredentialOpen(false); setCredentialError(null); },
+                })
+              : h(CredentialBindingPanel, {
+                  channel,
+                  secretLabel: 'Bot Token',
+                  secretPlaceholder: tokenPlaceholder,
+                  busy,
+                  error: credentialError,
+                  onSubmit: bindCredentials,
+                  onCancel: () => { setCredentialOpen(false); setCredentialError(null); },
+                })) : null,
             model.bots.length === 0 && !credentialOpen
               ? h('div', { className: 'ddt-card dim-surfaceCard' },
                   h('div', { className: 'ddt-cardBody ddt-empty dim-surfaceBody dim-emptyView' },
@@ -264,7 +281,7 @@ export function createTokenChannelSettings(definition) {
                         h(Button, {
                           kind: 'primary',
                           onClick: () => setCredentialOpen(true),
-                        }, '填写 Bot Token'))),
+                        }, emptyActionLabel))),
                     h('div', {
                       className: `ddt-brandMark dim-emptyBrand ${avatarClass}`,
                       'aria-hidden': 'true',

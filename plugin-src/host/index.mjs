@@ -5,6 +5,7 @@ import { apply as applyQq } from './channels/qq/index.mjs';
 import { apply as applyTelegram } from './channels/telegram/index.mjs';
 import { apply as applyWecom } from './channels/wecom/index.mjs';
 import { apply as applyWeixin } from './channels/weixin/index.mjs';
+import { apply as applyWhatsapp } from './channels/whatsapp/index.mjs';
 
 export const name = 'dsh-im-host';
 export const inject = ['connection', 'credentials', 'webServer'];
@@ -24,6 +25,7 @@ export function createImHostPlugin(internals = {}) {
   const startQq = internals.applyQq ?? applyQq;
   const startTelegram = internals.applyTelegram ?? applyTelegram;
   const startDiscord = internals.applyDiscord ?? applyDiscord;
+  const startWhatsapp = internals.applyWhatsapp ?? applyWhatsapp;
   return Object.freeze({
     name,
     inject,
@@ -35,6 +37,7 @@ export function createImHostPlugin(internals = {}) {
       await startQq(ctx, channelConfig(config, 'qq'));
       await startTelegram(ctx, channelConfig(config, 'telegram'));
       await startDiscord(ctx, channelConfig(config, 'discord'));
+      await startWhatsapp(ctx, channelConfig(config, 'whatsapp'));
     },
   });
 }

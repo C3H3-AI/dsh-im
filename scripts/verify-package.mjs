@@ -18,6 +18,7 @@ const required = [
   'plugin-src/host/channels/wecom/index.mjs',
   'plugin-src/host/channels/telegram/index.mjs',
   'plugin-src/host/channels/discord/index.mjs',
+  'plugin-src/host/channels/whatsapp/index.mjs',
   'src/channels/feishu/feishu-runtime.mjs',
   'src/channels/weixin/weixin-runtime.mjs',
   'src/channels/dingtalk/dingtalk-runtime.mjs',
@@ -25,6 +26,8 @@ const required = [
   'src/channels/wecom/wecom-runtime.mjs',
   'src/channels/telegram/telegram-runtime.mjs',
   'src/channels/discord/discord-runtime.mjs',
+  'src/channels/whatsapp/whatsapp-runtime.mjs',
+  'src/channels/whatsapp/whatsapp-web-session.mjs',
 ];
 await Promise.all(required.map((path) => access(resolve(root, path))));
 
@@ -57,7 +60,7 @@ if (!client.includes('container-type: inline-size')
   || !client.includes('@container (max-width: 680px)')) {
   throw new Error('client bundle does not contain the narrow-panel DingTalk QR layout');
 }
-for (const marker of ['/feishu', '/weixin', '/dingtalk', '/wecom', '/qq', '/telegram', '/discord']) {
+for (const marker of ['/feishu', '/weixin', '/dingtalk', '/wecom', '/qq', '/telegram', '/discord', '/whatsapp']) {
   if (!host.includes(marker)) {
     throw new Error(`host bundle does not contain the internal ${marker} RPC provider`);
   }
@@ -83,6 +86,7 @@ const directDependencies = {
   '@tencent-connect/qqbot-connector': '1.2.0',
   '@tencent-connect/qqbot-nodejs': '1.0.4',
   '@wecom/aibot-node-sdk': '1.0.7',
+  '@whiskeysockets/baileys': '7.0.0-rc14',
   qrcode: '1.5.4',
 };
 for (const [name, version] of Object.entries(directDependencies)) {
@@ -101,8 +105,8 @@ for (const [name, version] of Object.entries(bundledBuildDependencies)) {
     throw new Error(`${name} must be a pinned build dependency at ${version}`);
   }
 }
-if (lock.packages?.['node_modules/protobufjs']?.dev !== true) {
-  throw new Error('protobufjs must remain build-only in the package lock');
+if (lock.packages?.['node_modules/protobufjs']?.dev === true) {
+  throw new Error('protobufjs must remain available to the Baileys runtime');
 }
 if (manifest.bin?.['dsh-im'] !== 'bin/dsh-im.mjs') {
   throw new Error('package manifest must publish the dsh-im executable');
