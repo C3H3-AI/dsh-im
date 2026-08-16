@@ -14,7 +14,7 @@
     "access": "public"
   },
   "bin": {
-    "dsh-im": "./bin/dsh-im.mjs"
+    "dsh-im": "bin/dsh-im.mjs"
   },
   "main": "./lib/index.js",
   "exports": {

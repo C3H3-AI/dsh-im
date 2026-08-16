@@ -104,6 +104,9 @@ for (const [name, version] of Object.entries(bundledBuildDependencies)) {
 if (lock.packages?.['node_modules/protobufjs']?.dev !== true) {
   throw new Error('protobufjs must remain build-only in the package lock');
 }
+if (manifest.bin?.['dsh-im'] !== 'bin/dsh-im.mjs') {
+  throw new Error('package manifest must publish the dsh-im executable');
+}
 if (/(?:from\s*|import\s*\(|require\s*\()\s*["'](?:@larksuiteoapi\/node-sdk|protobufjs)(?:\/[^"']*)?["']/.test(host)) {
   throw new Error('host bundle must not import the Feishu SDK or protobufjs at runtime');
 }
