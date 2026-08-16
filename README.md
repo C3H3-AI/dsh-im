@@ -4,8 +4,6 @@
 
 通过扫码或已有机器人凭据把 IM 机器人接入 DeepSeek Harness。一个插件、一个设置入口，统一管理飞书、微信、钉钉、企业微信、QQ、Telegram 和 Discord 机器人。
 
-> GitHub 简介：通过扫码或机器人凭据把IM机器人接入DeepSeek Harness（支持飞书、微信、钉钉、企业微信、QQ、Telegram和Discord）。
-
 ## 界面
 
 ![IM机器人页面](docs/images/imbot.png)
