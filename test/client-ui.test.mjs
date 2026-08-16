@@ -105,6 +105,35 @@ test('IM settings renders eight compact logo channel tabs without enable switche
   assert.doesNotMatch(markup, />INSTANT MESSAGING<|>Channel<|>微信设置</);
 });
 
+test('all channel styles use the current Harness theme tokens', async () => {
+  const styles = (await Promise.all([
+    readFile(STYLES_URL, 'utf8'),
+    readFile(FEISHU_STYLES_URL, 'utf8'),
+    readFile(WEIXIN_STYLES_URL, 'utf8'),
+    readFile(DINGTALK_STYLES_URL, 'utf8'),
+    readFile(WECOM_STYLES_URL, 'utf8'),
+  ])).join('\n');
+
+  assert.doesNotMatch(
+    styles,
+    /--dsw-alias-(?:bg-body|line-border|line-divider|fill-secondary|fill-tertiary|state-warning-primary)/,
+  );
+  assert.match(styles, /--dsw-alias-bg-layer-1/);
+  assert.match(styles, /--dsw-alias-bg-module-platform/);
+  assert.match(styles, /--dsw-alias-interactive-bg-hover/);
+  assert.match(styles, /--dsw-alias-border-l1/);
+  assert.match(styles, /--dsw-alias-border-l2/);
+  assert.match(styles, /--dim-blue: var\(--dsw-alias-state-business-primary, #3370ff\)/);
+  assert.match(
+    styles,
+    /\.dim-channel\[aria-selected="true"\][^}]*var\(--dsw-alias-bg-layer-3/,
+  );
+  assert.match(
+    styles,
+    /\.dim-panel \.dim-qrExpired[^}]*--dsw-static-neutral-bluish-1000/,
+  );
+});
+
 test('shared QR cards stay square and stack within the narrow combined-channel panel', async () => {
   const styles = await readFile(STYLES_URL, 'utf8');
   assert.match(styles, /\.dim-panel \{ min-width: 0; container-type: inline-size; \}/);
@@ -195,7 +224,7 @@ test('credential binding is a distinct secondary action beside QR binding in fou
 
   const styles = await readFile(STYLES_URL, 'utf8');
   assert.match(styles, /\.dim-panel \.dim-bindActions \{[^}]*flex-wrap: nowrap;/);
-  assert.match(styles, /\.dim-panel \.dim-credentialButton \{[^}]*border: 1px solid #86909c;[^}]*background: var\(--dsw-alias-bg-body, #fff\)/);
+  assert.match(styles, /\.dim-panel \.dim-credentialButton \{[^}]*border: 1px solid #86909c;[^}]*background: var\(--dsw-alias-bg-layer-1, #fff\)/);
   assert.match(styles, /\.dim-panel \.dim-actionIcon \{[^}]*flex: 0 0 15px;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-credentialPanel \{[^}]*border-left:/);
 });
@@ -257,7 +286,7 @@ test('scan actions align left while online totals align right in every channel',
   assert.doesNotMatch(weixinHeading, /dxw-dot/);
   assert.doesNotMatch(dingtalkHeading, /ddt-dot/);
   assert.match(imStyles, /\.dim-panel \.bxf-headingTools \.dim-scanButton,[^}]*border: 1px solid #1677ff;[^}]*border-radius: 8px;[^}]*background: #1677ff;[^}]*box-shadow: none;/);
-  assert.match(imStyles, /\.dim-panel \.bxf-headingTools \.dim-onlineBadge,[^}]*border-radius: 999px;[^}]*background: var\(--dsw-alias-fill-secondary, #f2f3f5\);[^}]*font-size: 12px;/);
+  assert.match(imStyles, /\.dim-panel \.bxf-headingTools \.dim-onlineBadge,[^}]*border-radius: 999px;[^}]*background: var\(--dsw-alias-bg-module-platform, #f2f3f5\);[^}]*font-size: 12px;/);
 });
 
 test('channel headings omit the redundant local credential badge', () => {
@@ -425,7 +454,7 @@ test('all channel card action buttons stay on one row', async () => {
 test('all channel bot cards use the DingTalk card treatment', async () => {
   const styles = await readFile(STYLES_URL, 'utf8');
 
-  assert.match(styles, /\.dim-panel \.dim-botCard \{[^}]*border-radius: 14px;[^}]*background: var\(--dsw-alias-bg-body, #fff\);[^}]*box-shadow: 0 1px 2px/);
+  assert.match(styles, /\.dim-panel \.dim-botCard \{[^}]*border-radius: 14px;[^}]*background: var\(--dsw-alias-bg-layer-1, #fff\);[^}]*box-shadow: 0 1px 2px/);
   assert.match(styles, /\.dim-panel \.dim-botCardBody \{[^}]*padding: 24px;/);
   assert.match(styles, /\.dim-panel \.dim-botCardTop \{[^}]*align-items: flex-start;[^}]*gap: 16px;/);
   assert.match(styles, /\.dim-panel \.dim-botAvatar \{[^}]*width: 42px;[^}]*height: 42px;[^}]*border-radius: 12px;/);
