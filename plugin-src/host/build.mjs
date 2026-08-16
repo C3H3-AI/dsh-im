@@ -7,6 +7,14 @@ import { build } from 'esbuild';
 const sourceDirectory = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(sourceDirectory, '../..');
 const outputPath = resolve(packageRoot, 'lib/index.js');
+const externalRuntimePackages = [
+  '@tencent-connect/qqbot-connector',
+  '@tencent-connect/qqbot-nodejs',
+  '@wecom/aibot-node-sdk',
+  'dingtalk-stream',
+  'qrcode',
+];
+const external = externalRuntimePackages.flatMap((name) => [name, `${name}/*`]);
 
 await mkdir(dirname(outputPath), { recursive: true });
 await build({
@@ -15,10 +23,22 @@ await build({
   format: 'esm',
   platform: 'node',
   target: ['node22'],
-  packages: 'external',
+  mainFields: ['module', 'main'],
+  external,
   outfile: outputPath,
+  banner: {
+    js: [
+      "import { createRequire as __dshCreateRequire } from 'node:module';",
+      "import { dirname as __dshDirname } from 'node:path';",
+      "import { fileURLToPath as __dshFileURLToPath } from 'node:url';",
+      'const require = __dshCreateRequire(import.meta.url);',
+      'const __filename = __dshFileURLToPath(import.meta.url);',
+      'const __dirname = __dshDirname(__filename);',
+    ].join('\n'),
+  },
   sourcemap: false,
-  legalComments: 'none',
+  minify: true,
+  legalComments: 'eof',
 });
 
 console.log(`Wrote ${outputPath}`);

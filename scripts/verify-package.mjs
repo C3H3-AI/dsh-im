@@ -1,5 +1,6 @@
 import { access, readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const root = resolve(import.meta.dirname, '..');
 const required = [
@@ -38,6 +39,7 @@ const [client, host, patch, manifestText, lockText, hostSource, clientSource, ex
   stat(resolve(root, 'bin/dsh-im.mjs')),
 ]);
 const manifest = JSON.parse(manifestText);
+const lock = JSON.parse(lockText);
 
 if (!client.includes('id: "@xmanrui/dsh-im"')) {
   throw new Error('client bundle does not register the dsh-im loader id');
@@ -77,7 +79,6 @@ for (const name of ['@xmanrui/dsh-feishu', '@xmanrui/dsh-weixin', '@xmanrui/dsh-
   }
 }
 const directDependencies = {
-  '@larksuiteoapi/node-sdk': '1.73.0',
   'dingtalk-stream': '2.1.4',
   '@tencent-connect/qqbot-connector': '1.2.0',
   '@tencent-connect/qqbot-nodejs': '1.0.4',
@@ -89,9 +90,27 @@ for (const [name, version] of Object.entries(directDependencies)) {
     throw new Error(`${name} must be a pinned direct dependency at ${version}`);
   }
 }
+const bundledBuildDependencies = {
+  '@larksuiteoapi/node-sdk': '1.73.0',
+};
+for (const [name, version] of Object.entries(bundledBuildDependencies)) {
+  if (manifest.dependencies?.[name] !== undefined) {
+    throw new Error(`${name} must not remain a runtime dependency`);
+  }
+  if (manifest.devDependencies?.[name] !== version) {
+    throw new Error(`${name} must be a pinned build dependency at ${version}`);
+  }
+}
+if (lock.packages?.['node_modules/protobufjs']?.dev !== true) {
+  throw new Error('protobufjs must remain build-only in the package lock');
+}
+if (/(?:from\s*|import\s*\(|require\s*\()\s*["'](?:@larksuiteoapi\/node-sdk|protobufjs)(?:\/[^"']*)?["']/.test(host)) {
+  throw new Error('host bundle must not import the Feishu SDK or protobufjs at runtime');
+}
 if ((executable.mode & 0o111) === 0) throw new Error('dsh-im CLI is not executable');
 if (/private-bot-token|must-be-rolled-back|DEEPSEEK_API_KEY=/.test(client + host)) {
   throw new Error('built artifacts contain a test or environment secret marker');
 }
+await import(pathToFileURL(resolve(root, 'lib/index.js')).href);
 
 console.log('Verified dsh-im package artifacts.');
