@@ -2721,7 +2721,6 @@ export class FeishuHarnessBridge {
     // Session-sync cards target the user's openId (the synced DM is a user,
     // not a chat), delivered fresh without topic/thread handling.
     if (options.receiveIdType === 'open_id') {
-      console.error('[dsh-feishu][ss-debug] sendCard via open_id:', chatId);
       const response = await this.#client.im.v1.message.create({
         params: { receive_id_type: 'open_id' },
         data: {
@@ -3259,7 +3258,7 @@ export class FeishuHarnessBridge {
   #ensureEventWatcher() {
     if (this.#eventWatcher) return;
     if (typeof this.#harness?.watchHarnessEvents !== 'function') {
-      console.error('[dsh-feishu][ss-debug] event watcher unavailable: harness lacks watchHarnessEvents');
+      this.#logger.warn?.('[dsh-feishu] harness lacks watchHarnessEvents; session-sync mirror disabled');
       return;
     }
     if (this.#signal?.aborted) return;
@@ -3268,7 +3267,6 @@ export class FeishuHarnessBridge {
       this.#eventWatcher = this.#harness.watchHarnessEvents({
         signal,
         onSessionEvent: (payload) => {
-          console.error('[dsh-feishu][ss-debug] mux delivered:', payload?.sessionId, payload?.event?.type);
           this.#onHarnessEvent(payload);
         },
         onReconnect: () => {
@@ -3637,20 +3635,15 @@ export class FeishuHarnessBridge {
 
     if (type === 'turn/start') {
       if (this.#stepCards.has(key)) {
-        console.error('[dsh-feishu][ss-debug] turn/start: card already exists');
         return;
       }
       if (this.#isImTurn(sessionId)) {
-        console.error('[dsh-feishu][ss-debug] turn/start: IM turn owns', sessionId);
         return;
       }
       const targets = await this.#sessionSyncTargetsFor?.(sessionId);
-      console.error('[dsh-feishu][ss-debug] turn/start targets:', JSON.stringify(targets ?? null),
-        'this bot:', this.#botId ?? 'unknown');
       const owned = (Array.isArray(targets) ? targets : [])
         .find((target) => target.botId === this.#botId);
       if (!owned?.openId) {
-        console.error('[dsh-feishu][ss-debug] turn/start: no owned target, skip');
         return;
       }
       this.#sessionSyncTargets.set(sessionId, owned.openId);
@@ -3681,7 +3674,7 @@ export class FeishuHarnessBridge {
             return this.#feedSessionSyncTurn(sessionId, event);
           })
           .catch((error) => {
-            console.error('[dsh-feishu][ss-debug] adopt failed:', error?.message ?? error);
+            this.#logger.warn?.('[dsh-feishu] session-sync adopt failed:', error?.message ?? error);
           })
           .finally(() => this.#sessionSyncAdopting.delete(sessionId));
       }
@@ -4261,7 +4254,7 @@ export class FeishuHarnessBridge {
         error?.message ?? String(error),
       );
       if (card.deliveryViaOpenId) {
-        console.error('[dsh-feishu][ss-debug] mirror card render failed:',
+        this.#logger.warn?.('[dsh-feishu] session-sync mirror card render failed:',
           error?.message ?? String(error));
       }
     }

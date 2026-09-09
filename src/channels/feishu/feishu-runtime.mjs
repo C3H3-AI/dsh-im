@@ -643,7 +643,6 @@ export class FeishuRuntime {
       throw error;
     }
     signal?.throwIfAborted();
-    console.error('[dsh-feishu][ss-debug] proactive text:', receiveIdType, receiveId, 'bot:', this.#botId ?? 'unknown');
     const response = await this.#client.im.v1.message.create({
       params: { receive_id_type: receiveIdType },
       data: {
