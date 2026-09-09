@@ -28,6 +28,7 @@ import {
   validHarnessQuestion,
 } from '../shared/harness-question.mjs';
 import { HarnessApprovalQueue } from '../shared/harness-approval.mjs';
+import { textFromHarnessContent } from '../shared/harness-client.mjs';
 import {
   BatchInputManager,
   batchInputBusyMessage,
@@ -107,7 +108,6 @@ import {
   FEISHU_STEP_PUSH_MODES,
   normalizeFeishuStepPushMode,
 } from './step-push-mode.mjs';
-import { SessionSyncRenderer } from './session-sync-renderer.mjs';
 
 // Lazily evaluated: t() must run after setImHostLanguage, not at import time.
 const INTERACTION_RESOLVED_TEXT = () => t('这个问题已在其他客户端处理，无需再次回答。');
@@ -634,10 +634,12 @@ export class FeishuHarnessBridge {
   #observedCompletionEvents = new Map();
   /** Earliest completion that still needs delivery for each watch. */
   #failedWatchSeqs = new Map();
-  /** sessionId -> SessionSyncRenderer for Web/CLI turns mirrored to DMs. */
-  #sessionSyncRenders = new Map();
-  /** Host-provided resolver: sessionId -> [{ openId }] synced DM targets. */
+  /** Host resolver: sessionId -> synced DM targets [{ openId, botId }]. */
   #sessionSyncTargetsFor = null;
+  /** sessionId -> openId for live session-sync mirrors. */
+  #sessionSyncTargets = new Map();
+  /** In-flight adopt lookups, deduped per session. */
+  #sessionSyncAdopting = new Set();
   #cardDataTimeoutMs;
   /** When true, approval/question interactions render as Feishu cards (buttons). */
   #interactionCards = true;
@@ -2713,6 +2715,25 @@ export class FeishuHarnessBridge {
     const updateMessageId = nonEmptyString(options.updateMessageId);
     const replyTo = nonEmptyString(options.replyTo);
 
+    // Session-sync cards target the user's openId (the synced DM is a user,
+    // not a chat), delivered fresh without topic/thread handling.
+    if (options.receiveIdType === 'open_id') {
+      const response = await this.#client.im.v1.message.create({
+        params: { receive_id_type: 'open_id' },
+        data: {
+          receive_id: chatId,
+          msg_type: 'interactive',
+          content: cardJson,
+        },
+      });
+      if (response?.code && response.code !== 0) {
+        throw new Error(`Feishu card send failed: ${response.msg || response.code}`);
+      }
+      const sentId = nonEmptyString(response?.data?.message_id);
+      if (!sentId) throw new Error('Feishu card send returned no message_id');
+      return sentId;
+    }
+
     if (updateMessageId) {
       try {
         const response = await this.#client.im.v1.message.patch({
@@ -3583,39 +3604,87 @@ export class FeishuHarnessBridge {
 
   /** Queue live turn completions behind any reconnect compensation. */
   /**
-   * Feed one Harness session event to the session-sync mirror for this
-   * session, creating the renderer on turn/start when the session has synced
-   * DM targets and no bridge-owned process card (an IM-opened turn owns its
-   * own card and must not be double-rendered).
+   * Mirror one Harness session event into the session-sync process card for
+   * this session (a Web/CLI-initiated turn with a synced DM target). Events
+   * are translated into the same update shapes the ask callbacks produce, so
+   * the regular #stepCards ladder renders them identically: tool/call ->
+   * tool block, assistant/message -> live answer draft, turn/end -> sealed
+   * terminal card with the final answer.
    */
-  async #feedSessionSyncRenderer(sessionId, event) {
+  async #feedSessionSyncTurn(sessionId, event) {
     if (this.#signal?.aborted) return;
+    const key = `session-sync\0${sessionId}`;
     const type = event?.type;
-    let renderer = this.#sessionSyncRenders.get(sessionId);
+    const openId = this.#sessionSyncTargets.get(sessionId);
 
     if (type === 'turn/start') {
-      if (renderer) return;
-      // An IM-opened turn already owns its card: every conversation key bound
-      // to this session maps to a step card while the turn runs.
-      for (const key of this.#stepCards.keys()) {
-        if (this.#state.sessionFor?.(key) === sessionId) return;
+      if (this.#stepCards.has(key)) return;
+      // An IM-opened turn already owns its card: any conversation key bound
+      // to this session maps to a live step card while the turn runs.
+      for (const [imKey, card] of this.#stepCards) {
+        if (!card.deliveryViaOpenId && this.#state.sessionFor?.(imKey) === sessionId) return;
       }
       const targets = await this.#sessionSyncTargetsFor?.(sessionId);
-      if (!Array.isArray(targets) || targets.length === 0) return;
-      renderer = new SessionSyncRenderer({
-        client: this.#client,
-        logger: this.#logger,
-        target: targets[0],
-      });
-      renderer.onFallback(async (answerText) => {
-        await this.#send(targets[0].openId, answerText).catch(() => undefined);
-      });
-      this.#sessionSyncRenders.set(sessionId, renderer);
+      const owned = (Array.isArray(targets) ? targets : [])
+        .find((target) => target.botId === this.#botId);
+      if (!owned?.openId) return;
+      this.#sessionSyncTargets.set(sessionId, owned.openId);
+      // chatId carries the openId; #sendCard branches on the delivery marker.
+      this.#ensureStepCard(key, owned.openId, null);
+      this.#stepCards.get(key).deliveryViaOpenId = true;
       return;
     }
-    if (!renderer) return;
-    await renderer.handleEvent(event);
-    if (type === 'turn/end') this.#sessionSyncRenders.delete(sessionId);
+
+    const card = this.#stepCards.get(key);
+    if (!card) {
+      // The bridge (re)started mid-turn: adopt the running turn on its first
+      // visible event so the mirror still renders from here on.
+      if ((type === 'assistant/message' || type === 'tool/call')
+        && !this.#sessionSyncAdopting.has(sessionId)) {
+        this.#sessionSyncAdopting.add(sessionId);
+        Promise.resolve()
+          .then(() => this.#sessionSyncTargetsFor?.(sessionId))
+          .then((targets) => {
+            const owned = (Array.isArray(targets) ? targets : [])
+              .find((target) => target.botId === this.#botId);
+            if (owned?.openId) {
+              this.#sessionSyncTargets.set(sessionId, owned.openId);
+              return this.#feedSessionSyncTurn(sessionId, event);
+            }
+          })
+          .catch((error) => {
+            console.warn('[dsh-feishu][ss-debug] adopt failed:', error?.message ?? error);
+          })
+          .finally(() => this.#sessionSyncAdopting.delete(sessionId));
+      }
+      return;
+    }
+    if (card.broken) return;
+
+    if (type === 'tool/call') {
+      await this.#appendStepCardUpdate(
+        key, openId, null,
+        this.#stepCardToolBlock({
+          name: event?.data?.name ?? '',
+          arguments: typeof event?.data?.arguments === 'string' ? event.data.arguments : '',
+        }),
+        { billable: false },
+      );
+      return;
+    }
+    if (type === 'assistant/message') {
+      const text = textFromHarnessContent(event?.data?.message?.content);
+      if (text.trim()) this.#streamStepCardAnswer(key, openId, null, text);
+      return;
+    }
+    if (type === 'turn/end') {
+      this.#sessionSyncTargets.delete(sessionId);
+      await this.#finishStepCard(key, {
+        stopped: event?.data?.reason?.kind === 'aborted',
+        answerText: null,
+      });
+      return;
+    }
   }
 
   #onHarnessEvent({ sessionId, event }) {
@@ -3626,16 +3695,14 @@ export class FeishuHarnessBridge {
       || !validEventSeq(event.seq)) return;
 
     // Session-sync mirror: turns opened OUTSIDE the IM (DSH Web / CLI) are
-    // rendered into the synced DM with the same process-card ladder. Turns
-    // owned by an IM message are skipped — their card is rendered by the
-    // step-push path keyed on the conversation.
+    // rendered into the synced DM with the same #stepCards ladder as IM
+    // turns. IM-opened turns are skipped — they already own their card via
+    // the ask callbacks. turn/end continues below for watch completions.
     if (this.#sessionSyncTargetsFor) {
       void this.#queueEventTask(`session-sync\0${sessionId}`, async () => {
-        await this.#feedSessionSyncRenderer(sessionId, event);
+        await this.#feedSessionSyncTurn(sessionId, event);
       }).catch(() => {});
       if (event.type !== 'turn/end') return;
-      // turn/end continues below: watch completions and deferred delivery
-      // still apply to the same event.
     }
     // Record before consulting state: /watch may still be resolving its target
     // or waiting for setWatch persistence and therefore have no visible entry.
