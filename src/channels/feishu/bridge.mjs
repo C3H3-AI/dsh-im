@@ -641,6 +641,8 @@ export class FeishuHarnessBridge {
   #sessionSyncTargets = new Map();
   /** In-flight adopt lookups, deduped per session. */
   #sessionSyncAdopting = new Set();
+  /** Conversation keys with an IM ask in flight (set BEFORE the turn starts). */
+  #imTurnKeys = new Set();
   #cardDataTimeoutMs;
   /** When true, approval/question interactions render as Feishu cards (buttons). */
   #interactionCards = true;
@@ -3630,13 +3632,14 @@ export class FeishuHarnessBridge {
         console.error('[dsh-feishu][ss-debug] turn/start: card already exists');
         return;
       }
-      // An IM-opened turn already owns its card: the bridge's own ask
-      // registered an interaction ownership for this session BEFORE the turn
-      // started, so the ownership registry sees it reliably (unlike the
-      // #stepCards probe, which races the first process update).
-      if (hasActiveHarnessInteractionOwner(this.#harness, sessionId)) {
-        console.error('[dsh-feishu][ss-debug] turn/start: IM turn owns via ownership registry');
-        return;
+      // An IM-opened turn already owns its card: the bridge registered the
+      // conversation key before calling ask, so the key->session mapping is
+      // authoritative here (ask runs before the turn's events are emitted).
+      for (const imKey of this.#imTurnKeys) {
+        if (this.#state.sessionFor?.(imKey) === sessionId) {
+          console.error('[dsh-feishu][ss-debug] turn/start: IM turn owns', imKey);
+          return;
+        }
       }
       const targets = await this.#sessionSyncTargetsFor?.(sessionId);
       console.error('[dsh-feishu][ss-debug] turn/start targets:', JSON.stringify(targets ?? null),
@@ -4659,6 +4662,7 @@ export class FeishuHarnessBridge {
    * （工具参数折叠为代码块）；post 失败走既有纯文本降级。
    */
   async #answerWithStepPush(event, key, message, { onAskComplete } = {}) {
+    this.#imTurnKeys.add(key);
     const chatId = event.message.chat_id;
     const messageId = event.message.message_id;
     const text = message.content;
@@ -4666,6 +4670,7 @@ export class FeishuHarnessBridge {
     const markAskComplete = () => {
       if (askCompleted) return;
       askCompleted = true;
+      this.#imTurnKeys.delete(key);
       onAskComplete?.();
     };
     // 与流式分支一致的提示内容构造：图片与回复引用展开为富提示内容，已接受
@@ -4978,6 +4983,7 @@ export class FeishuHarnessBridge {
     const markAskComplete = () => {
       if (askCompleted) return;
       askCompleted = true;
+      this.#imTurnKeys.delete(key);
       onAskComplete?.();
     };
     // 分步直推：开关开启且通道支持流式卡时，在构造提示内容之前分流到完整替
