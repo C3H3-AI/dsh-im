@@ -3712,19 +3712,21 @@ export class FeishuHarnessBridge {
       || !sessionId
       || !event
       || typeof event !== 'object'
-      || event.type !== 'turn/end'
       || !validEventSeq(event.seq)) return;
 
     // Session-sync mirror: turns opened OUTSIDE the IM (DSH Web / CLI) are
     // rendered into the synced DM with the same #stepCards ladder as IM
-    // turns. IM-opened turns are skipped — they already own their card via
-    // the ask callbacks. turn/end continues below for watch completions.
+    // turns. The mirror consumes EVERY event type (turn/start opens the
+    // card, tool/call and assistant/message feed it, turn/end seals it);
+    // IM-opened turns are skipped — they already own their card via the ask
+    // callbacks. turn/end ALSO continues below for watch completions.
     if (this.#sessionSyncTargetsFor) {
       void this.#queueEventTask(`session-sync\0${sessionId}`, async () => {
         await this.#feedSessionSyncTurn(sessionId, event);
       }).catch(() => {});
       if (event.type !== 'turn/end') return;
     }
+    if (event.type !== 'turn/end') return;
     // Record before consulting state: /watch may still be resolving its target
     // or waiting for setWatch persistence and therefore have no visible entry.
     this.#recordObservedCompletion(sessionId, event);
