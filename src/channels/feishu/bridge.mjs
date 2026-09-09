@@ -106,6 +106,7 @@ import {
   FEISHU_STEP_PUSH_MODES,
   normalizeFeishuStepPushMode,
 } from './step-push-mode.mjs';
+import { SessionSyncRenderer } from './session-sync-renderer.mjs';
 
 // Lazily evaluated: t() must run after setImHostLanguage, not at import time.
 const INTERACTION_RESOLVED_TEXT = () => t('这个问题已在其他客户端处理，无需再次回答。');
@@ -620,6 +621,10 @@ export class FeishuHarnessBridge {
   #observedCompletionEvents = new Map();
   /** Earliest completion that still needs delivery for each watch. */
   #failedWatchSeqs = new Map();
+  /** sessionId -> SessionSyncRenderer for Web/CLI turns mirrored to DMs. */
+  #sessionSyncRenders = new Map();
+  /** Host-provided resolver: sessionId -> [{ openId }] synced DM targets. */
+  #sessionSyncTargetsFor = null;
   #cardDataTimeoutMs;
   /** When true, approval/question interactions render as Feishu cards (buttons). */
   #interactionCards = true;
@@ -647,6 +652,7 @@ export class FeishuHarnessBridge {
     cardDataTimeoutMs = CARD_DATA_TIMEOUT_MS,
     replyTimeoutMs = 600_000,
     interactionCards = true,
+    sessionSyncTargetsFor = null,
     logger = console,
     signal,
   }) {
@@ -696,6 +702,9 @@ export class FeishuHarnessBridge {
     this.#cardDataTimeoutMs = cardDataTimeoutMs;
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#interactionCards = interactionCards === true;
+    this.#sessionSyncTargetsFor = typeof sessionSyncTargetsFor === 'function'
+      ? sessionSyncTargetsFor
+      : null;
     this.#logger = logger;
     this.#approvals = new HarnessApprovalQueue({ label: 'Feishu', logger });
     this.#signal = signal;
@@ -3511,13 +3520,61 @@ export class FeishuHarnessBridge {
   }
 
   /** Queue live turn completions behind any reconnect compensation. */
+  /**
+   * Feed one Harness session event to the session-sync mirror for this
+   * session, creating the renderer on turn/start when the session has synced
+   * DM targets and no bridge-owned process card (an IM-opened turn owns its
+   * own card and must not be double-rendered).
+   */
+  async #feedSessionSyncRenderer(sessionId, event) {
+    if (this.#signal?.aborted) return;
+    const type = event?.type;
+    let renderer = this.#sessionSyncRenders.get(sessionId);
+
+    if (type === 'turn/start') {
+      if (renderer) return;
+      // An IM-opened turn already owns its card: every conversation key bound
+      // to this session maps to a step card while the turn runs.
+      for (const key of this.#stepCards.keys()) {
+        if (this.#state.sessionFor?.(key) === sessionId) return;
+      }
+      const targets = await this.#sessionSyncTargetsFor?.(sessionId);
+      if (!Array.isArray(targets) || targets.length === 0) return;
+      renderer = new SessionSyncRenderer({
+        client: this.#client,
+        logger: this.#logger,
+        target: targets[0],
+      });
+      renderer.onFallback(async (answerText) => {
+        await this.#send(targets[0].openId, answerText).catch(() => undefined);
+      });
+      this.#sessionSyncRenders.set(sessionId, renderer);
+      return;
+    }
+    if (!renderer) return;
+    await renderer.handleEvent(event);
+    if (type === 'turn/end') this.#sessionSyncRenders.delete(sessionId);
+  }
+
   #onHarnessEvent({ sessionId, event }) {
     if (this.#signal?.aborted
       || !sessionId
       || !event
       || typeof event !== 'object'
-      || event.type !== 'turn/end'
       || !validEventSeq(event.seq)) return;
+
+    // Session-sync mirror: turns opened OUTSIDE the IM (DSH Web / CLI) are
+    // rendered into the synced DM with the same process-card ladder. Turns
+    // owned by an IM message are skipped — their card is rendered by the
+    // step-push path keyed on the conversation.
+    if (this.#sessionSyncTargetsFor) {
+      void this.#queueEventTask(`session-sync\0${sessionId}`, async () => {
+        await this.#feedSessionSyncRenderer(sessionId, event);
+      }).catch(() => {});
+      if (event.type !== 'turn/end') return;
+      // turn/end continues below: watch completions and deferred delivery
+      // still apply to the same event.
+    }
     // Record before consulting state: /watch may still be resolving its target
     // or waiting for setWatch persistence and therefore have no visible entry.
     this.#recordObservedCompletion(sessionId, event);
