@@ -2714,6 +2714,7 @@ export class FeishuHarnessBridge {
     // Session-sync cards target the user's openId (the synced DM is a user,
     // not a chat), delivered fresh without topic/thread handling.
     if (options.receiveIdType === 'open_id') {
+      console.error('[dsh-feishu][ss-debug] sendCard via open_id:', chatId);
       const response = await this.#client.im.v1.message.create({
         params: { receive_id_type: 'open_id' },
         data: {
@@ -3643,13 +3644,15 @@ export class FeishuHarnessBridge {
           .then((targets) => {
             const owned = (Array.isArray(targets) ? targets : [])
               .find((target) => target.botId === this.#botId);
-            if (owned?.openId) {
-              this.#sessionSyncTargets.set(sessionId, owned.openId);
-              return this.#feedSessionSyncTurn(sessionId, event);
-            }
+            if (!owned?.openId) return null;
+            this.#sessionSyncTargets.set(sessionId, owned.openId);
+            // Adopt = open the mirror card NOW, then handle this event.
+            this.#ensureStepCard(key, owned.openId, null);
+            this.#stepCards.get(key).deliveryViaOpenId = true;
+            return this.#feedSessionSyncTurn(sessionId, event);
           })
           .catch((error) => {
-            console.warn('[dsh-feishu][ss-debug] adopt failed:', error?.message ?? error);
+            console.error('[dsh-feishu][ss-debug] adopt failed:', error?.message ?? error);
           })
           .finally(() => this.#sessionSyncAdopting.delete(sessionId));
       }
