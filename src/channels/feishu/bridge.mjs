@@ -667,6 +667,7 @@ export class FeishuHarnessBridge {
     cardDataTimeoutMs = CARD_DATA_TIMEOUT_MS,
     replyTimeoutMs = 600_000,
     interactionCards = true,
+    sessionSyncTargetsFor = null,
     logger = console,
     signal,
   }) {
@@ -716,6 +717,9 @@ export class FeishuHarnessBridge {
     this.#cardDataTimeoutMs = cardDataTimeoutMs;
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#interactionCards = interactionCards === true;
+    this.#sessionSyncTargetsFor = typeof sessionSyncTargetsFor === 'function'
+      ? sessionSyncTargetsFor
+      : null;
     this.#logger = logger;
     this.#approvals = new HarnessApprovalQueue({ label: 'Feishu', logger });
     this.#signal = signal;
@@ -3251,13 +3255,19 @@ export class FeishuHarnessBridge {
 
   #ensureEventWatcher() {
     if (this.#eventWatcher) return;
-    if (typeof this.#harness?.watchHarnessEvents !== 'function') return;
+    if (typeof this.#harness?.watchHarnessEvents !== 'function') {
+      console.error('[dsh-feishu][ss-debug] event watcher unavailable: harness lacks watchHarnessEvents');
+      return;
+    }
     if (this.#signal?.aborted) return;
     const signal = this.#signal ?? new AbortController().signal;
     try {
       this.#eventWatcher = this.#harness.watchHarnessEvents({
         signal,
-        onSessionEvent: (payload) => this.#onHarnessEvent(payload),
+        onSessionEvent: (payload) => {
+          console.error('[dsh-feishu][ss-debug] mux delivered:', payload?.sessionId, payload?.event?.type);
+          this.#onHarnessEvent(payload);
+        },
         onReconnect: () => {
           void this.#compensateMissedEvents();
           void this.#deferred.resume();
@@ -3615,16 +3625,27 @@ export class FeishuHarnessBridge {
     const openId = this.#sessionSyncTargets.get(sessionId);
 
     if (type === 'turn/start') {
-      if (this.#stepCards.has(key)) return;
+      if (this.#stepCards.has(key)) {
+        console.error('[dsh-feishu][ss-debug] turn/start: card already exists');
+        return;
+      }
       // An IM-opened turn already owns its card: any conversation key bound
       // to this session maps to a live step card while the turn runs.
       for (const [imKey, card] of this.#stepCards) {
-        if (!card.deliveryViaOpenId && this.#state.sessionFor?.(imKey) === sessionId) return;
+        if (!card.deliveryViaOpenId && this.#state.sessionFor?.(imKey) === sessionId) {
+          console.error('[dsh-feishu][ss-debug] turn/start: IM turn owns', imKey);
+          return;
+        }
       }
       const targets = await this.#sessionSyncTargetsFor?.(sessionId);
+      console.error('[dsh-feishu][ss-debug] turn/start targets:', JSON.stringify(targets ?? null),
+        'this bot:', this.#botId ?? 'unknown');
       const owned = (Array.isArray(targets) ? targets : [])
         .find((target) => target.botId === this.#botId);
-      if (!owned?.openId) return;
+      if (!owned?.openId) {
+        console.error('[dsh-feishu][ss-debug] turn/start: no owned target, skip');
+        return;
+      }
       this.#sessionSyncTargets.set(sessionId, owned.openId);
       // chatId carries the openId; #sendCard branches on the delivery marker.
       this.#ensureStepCard(key, owned.openId, null);
@@ -4185,7 +4206,9 @@ export class FeishuHarnessBridge {
           const id = await this.#sendCard(
             chatId,
             stepStreamCard(chunks[index], { status: isLive ? 'running' : 'sealed' }),
-            { replyTo: card.replyToMessageId },
+            card.deliveryViaOpenId
+              ? { receiveIdType: 'open_id' }
+              : { replyTo: card.replyToMessageId },
           );
           card.cardIds.push(id);
           if (isLive) card.messageId = id;
@@ -4208,7 +4231,9 @@ export class FeishuHarnessBridge {
           const id = await this.#sendCard(
             chatId,
             stepStreamCard(chunks[index], { status: isLive ? 'running' : 'sealed' }),
-            { replyTo: card.replyToMessageId },
+            card.deliveryViaOpenId
+              ? { receiveIdType: 'open_id' }
+              : { replyTo: card.replyToMessageId },
           );
           card.cardIds.push(id);
           if (isLive) card.messageId = id;
@@ -4265,7 +4290,9 @@ export class FeishuHarnessBridge {
           const id = await this.#sendCard(
             card.chatId,
             stepStreamCard(groups[index], { status: isLive ? status : 'sealed' }),
-            { replyTo: card.replyToMessageId },
+            card.deliveryViaOpenId
+              ? { receiveIdType: 'open_id' }
+              : { replyTo: card.replyToMessageId },
           );
           card.cardIds.push(id);
         }
@@ -4285,7 +4312,9 @@ export class FeishuHarnessBridge {
           const id = await this.#sendCard(
             card.chatId,
             stepStreamCard(chunks[index], { status: isLast ? status : 'sealed' }),
-            { replyTo: card.replyToMessageId },
+            card.deliveryViaOpenId
+              ? { receiveIdType: 'open_id' }
+              : { replyTo: card.replyToMessageId },
           );
           card.cardIds.push(id);
           if (isLast) card.messageId = id;
