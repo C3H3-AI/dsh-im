@@ -3621,6 +3621,14 @@ export class FeishuHarnessBridge {
    * tool block, assistant/message -> live answer draft, turn/end -> sealed
    * terminal card with the final answer.
    */
+  /** True when this session's running turn was opened by one of OUR asks. */
+  #isImTurn(sessionId) {
+    for (const imKey of this.#imTurnKeys) {
+      if (this.#state.sessionFor?.(imKey) === sessionId) return true;
+    }
+    return false;
+  }
+
   async #feedSessionSyncTurn(sessionId, event) {
     if (this.#signal?.aborted) return;
     const key = `session-sync\0${sessionId}`;
@@ -3632,14 +3640,9 @@ export class FeishuHarnessBridge {
         console.error('[dsh-feishu][ss-debug] turn/start: card already exists');
         return;
       }
-      // An IM-opened turn already owns its card: the bridge registered the
-      // conversation key before calling ask, so the key->session mapping is
-      // authoritative here (ask runs before the turn's events are emitted).
-      for (const imKey of this.#imTurnKeys) {
-        if (this.#state.sessionFor?.(imKey) === sessionId) {
-          console.error('[dsh-feishu][ss-debug] turn/start: IM turn owns', imKey);
-          return;
-        }
+      if (this.#isImTurn(sessionId)) {
+        console.error('[dsh-feishu][ss-debug] turn/start: IM turn owns', sessionId);
+        return;
       }
       const targets = await this.#sessionSyncTargetsFor?.(sessionId);
       console.error('[dsh-feishu][ss-debug] turn/start targets:', JSON.stringify(targets ?? null),
@@ -3662,7 +3665,8 @@ export class FeishuHarnessBridge {
       // The bridge (re)started mid-turn: adopt the running turn on its first
       // visible event so the mirror still renders from here on.
       if ((type === 'assistant/message' || type === 'tool/call')
-        && !this.#sessionSyncAdopting.has(sessionId)) {
+        && !this.#sessionSyncAdopting.has(sessionId)
+        && !this.#isImTurn(sessionId)) {
         this.#sessionSyncAdopting.add(sessionId);
         Promise.resolve()
           .then(() => this.#sessionSyncTargetsFor?.(sessionId))
