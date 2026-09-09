@@ -29,6 +29,7 @@ import {
 } from '../shared/harness-question.mjs';
 import { HarnessApprovalQueue } from '../shared/harness-approval.mjs';
 import { textFromHarnessContent } from '../shared/harness-client.mjs';
+import { hasActiveHarnessInteractionOwner } from '../shared/harness-client.mjs';
 import {
   BatchInputManager,
   batchInputBusyMessage,
@@ -3629,13 +3630,13 @@ export class FeishuHarnessBridge {
         console.error('[dsh-feishu][ss-debug] turn/start: card already exists');
         return;
       }
-      // An IM-opened turn already owns its card: any conversation key bound
-      // to this session maps to a live step card while the turn runs.
-      for (const [imKey, card] of this.#stepCards) {
-        if (!card.deliveryViaOpenId && this.#state.sessionFor?.(imKey) === sessionId) {
-          console.error('[dsh-feishu][ss-debug] turn/start: IM turn owns', imKey);
-          return;
-        }
+      // An IM-opened turn already owns its card: the bridge's own ask
+      // registered an interaction ownership for this session BEFORE the turn
+      // started, so the ownership registry sees it reliably (unlike the
+      // #stepCards probe, which races the first process update).
+      if (hasActiveHarnessInteractionOwner(this.#harness, sessionId)) {
+        console.error('[dsh-feishu][ss-debug] turn/start: IM turn owns via ownership registry');
+        return;
       }
       const targets = await this.#sessionSyncTargetsFor?.(sessionId);
       console.error('[dsh-feishu][ss-debug] turn/start targets:', JSON.stringify(targets ?? null),
@@ -4252,6 +4253,10 @@ export class FeishuHarnessBridge {
         '[dsh-feishu] step streaming card render failed; the turn continues without it:',
         error?.message ?? String(error),
       );
+      if (card.deliveryViaOpenId) {
+        console.error('[dsh-feishu][ss-debug] mirror card render failed:',
+          error?.message ?? String(error));
+      }
     }
   }
 
