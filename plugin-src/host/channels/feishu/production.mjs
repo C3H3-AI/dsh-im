@@ -179,7 +179,7 @@ export async function createProductionController(ctx, config = {}, internals = {
       if (bound !== sessionId) continue;
       const target = workspaces.deliveryTargetFor(entry.botId, entry.targetId);
       const openId = target?.route?.openId;
-      if (openId) matches.push({ openId, botId: entry.botId });
+      if (openId) matches.push({ openId, botId: entry.botId, targetId: entry.targetId });
     }
     return matches;
   };

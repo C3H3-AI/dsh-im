@@ -115,9 +115,10 @@ export function createSessionSyncCoordinator({ deliveryService, logger = console
       if (event.surfaceOp !== 'append') return;
       if (state.origin === 'unknown') state.origin = origin;
       if (state.origin !== 'dsh' || origin !== 'dsh') return;
-      // The process-card mirror owns this session: it renders the turn
-      // (including the user echo) as a card, so plain text would duplicate.
-      if (isSessionSyncMirrored(sessionId)) return;
+      // The user echo stays as plain text even when the mirror owns the
+      // turn: the card also quotes the question, but keeping the echo here
+      // guarantees recipients are established so a failed mirror can still
+      // fall back to the final-answer text delivery.
       const text = textFromHarnessContent(event.data?.content);
       if (!text) return;
 
@@ -158,15 +159,19 @@ export function createSessionSyncCoordinator({ deliveryService, logger = console
     turns.delete(sessionId);
     if (state.origin !== 'dsh' || !completedTurn(event.data?.reason)
       || !state.recipients?.size || !state.assistant.text) return;
-    if (isSessionSyncMirrored(sessionId, state.turn)) {
-      // The mirror sealed the process card with the final answer; releasing
-      // here keeps the registry clean for the next turn.
-      releaseSessionSyncMirror(sessionId);
-      return;
+    // Per-target suppression: targets whose process-card mirror delivered
+    // the answer are skipped; every other synced target still gets the text.
+    const mirrored = [];
+    const plain = [];
+    for (const target of state.recipients.values()) {
+      if (isSessionSyncMirrored(sessionId, target.targetId, state.turn)) mirrored.push(target);
+      else plain.push(target);
     }
+    for (const target of mirrored) releaseSessionSyncMirror(sessionId, target.targetId);
+    if (plain.length === 0) return;
     await deliver(
       sessionId,
-      state.recipients.values(),
+      plain,
       `${DSH_ASSISTANT_PREFIX}${state.assistant.text}`,
       'assistant delivery',
     );

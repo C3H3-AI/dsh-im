@@ -10,6 +10,7 @@ const EMPTY_STATE = Object.freeze({
   deferred: {},
   includeArchivedSessions: false,
   topics: {},
+  mirrors: {},
 });
 
 /** One conversation key may watch at most this many sessions. */

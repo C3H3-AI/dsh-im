@@ -776,14 +776,13 @@ export class FeishuHarnessBridge {
         continue;
       }
       // The live card's last delivered content is persisted with the mirror:
-      // re-patch it with a stopped status line, keeping every panel intact.
+      // re-patch the live card with a stopped status line, keeping every
+      // panel intact. Sealed earlier chunks already carry no status line and
+      // keep their original content untouched.
       let sealContent = null;
       if (typeof entry.lastContent === 'string' && entry.lastContent) {
         try {
-          // setMirror stored the card double-encoded (JSON.stringify of the
-          // JSON string) — unwrap until an object with body.elements appears.
-          let parsed = JSON.parse(entry.lastContent);
-          while (typeof parsed === 'string') parsed = JSON.parse(parsed);
+          const parsed = JSON.parse(entry.lastContent);
           const elements = parsed?.body?.elements;
           if (Array.isArray(elements) && elements.length > 0) {
             const last = elements[elements.length - 1];
@@ -800,7 +799,8 @@ export class FeishuHarnessBridge {
       for (let index = 0; index < entry.cardIds.length; index += 1) {
         const content = index === entry.cardIds.length - 1 && sealContent
           ? JSON.stringify(sealContent)
-          : stepStreamCard([], { status: 'stopped' });
+          : null;
+        if (content === null) continue;
         await this.#patchStepCard(entry.cardIds[index], content)
           .catch((error) => {
             this.#logger.warn?.('[dsh-feishu] orphan mirror seal failed:', error?.message ?? error);
@@ -3715,6 +3715,14 @@ export class FeishuHarnessBridge {
     return false;
   }
 
+  #beginImTurn(key) {
+    this.#imTurnKeys.add(key);
+  }
+
+  #endImTurn(key) {
+    this.#imTurnKeys.delete(key);
+  }
+
   /**
    * The session-event mux forwards surfaced events (user/tool/assistant) but
    * NOT turn/start|turn/end, so the mirror cannot observe the turn boundary
@@ -3742,7 +3750,8 @@ export class FeishuHarnessBridge {
     if (this.#signal?.aborted) return;
     const key = `session-sync\0${sessionId}`;
     const type = event?.type;
-    const openId = this.#sessionSyncTargets.get(sessionId);
+    const target = this.#sessionSyncTargets.get(sessionId);
+    const openId = typeof target === 'string' ? target : target?.openId;
     this.#armSessionSyncIdleTimer(sessionId, key, openId);
 
     if (type === 'turn/start') {
@@ -3758,16 +3767,17 @@ export class FeishuHarnessBridge {
       if (!owned?.openId) {
         return;
       }
-      this.#sessionSyncTargets.set(sessionId, owned.openId);
+      this.#sessionSyncTargets.set(sessionId, owned);
       // chatId carries the openId; #sendCard branches on the delivery marker.
       this.#ensureStepCard(key, owned.openId, null);
       this.#stepCards.get(key).deliveryViaOpenId = true;
       this.#stepCards.get(key).sessionSyncSessionId = sessionId;
+      this.#stepCards.get(key).sessionSyncTargetId = owned.targetId ?? '';
       // Persist the mirror so a restart can seal an orphaned running card.
-      await this.#state.setMirror?.(sessionId, { chatId: owned.openId, cardIds: [], claimedAt: Date.now() });
-      // Claim the turn so the plain-text session-sync coordinator suppresses
-      // its duplicate delivery while the mirror owns this session.
-      claimSessionSyncMirror(sessionId);
+      await this.#state.setMirror?.(sessionId, { chatId: owned.openId, targetId: owned.targetId ?? '', cardIds: [], claimedAt: Date.now() });
+      // Claim only THIS target: the coordinator suppresses its plain text for
+      // the mirrored target while other synced targets keep their delivery.
+      claimSessionSyncMirror(sessionId, owned.targetId ?? '');
       return;
     }
 
@@ -3785,13 +3795,14 @@ export class FeishuHarnessBridge {
             const owned = (Array.isArray(targets) ? targets : [])
               .find((target) => target.botId === this.#botId);
             if (!owned?.openId) return null;
-            this.#sessionSyncTargets.set(sessionId, owned.openId);
+            this.#sessionSyncTargets.set(sessionId, owned);
             // Adopt = open the mirror card NOW, then handle this event.
             this.#ensureStepCard(key, owned.openId, null);
             this.#stepCards.get(key).deliveryViaOpenId = true;
             this.#stepCards.get(key).sessionSyncSessionId = sessionId;
-            void this.#state.setMirror?.(sessionId, { chatId: owned.openId, cardIds: [], claimedAt: Date.now() });
-            claimSessionSyncMirror(sessionId);
+            this.#stepCards.get(key).sessionSyncTargetId = owned.targetId ?? '';
+            void this.#state.setMirror?.(sessionId, { chatId: owned.openId, targetId: owned.targetId ?? '', cardIds: [], claimedAt: Date.now() });
+            claimSessionSyncMirror(sessionId, owned.targetId ?? '');
             return this.#feedSessionSyncTurn(sessionId, event);
           })
           .catch((error) => {
@@ -3801,7 +3812,10 @@ export class FeishuHarnessBridge {
       }
       return;
     }
-    if (card.broken) return;
+    // A broken card must not swallow the turn boundary: turn/end still needs
+    // to release the mirror claim and clear the state so later turns and the
+    // plain-text fallback work again.
+    if (card.broken && type !== 'turn/end') return;
 
     if (type === 'user/message' && event?.surfaceOp === 'append') {
       // The coordinator's plain-text user echo is suppressed for mirrored
@@ -3847,7 +3861,7 @@ export class FeishuHarnessBridge {
     if (type === 'turn/end') {
       this.#sessionSyncTargets.delete(sessionId);
       this.#sessionSyncPendingStep.delete(sessionId);
-      releaseSessionSyncMirror(sessionId);
+      releaseSessionSyncMirror(sessionId, card?.sessionSyncTargetId ?? '');
       await this.#finishStepCard(key, {
         stopped: event?.data?.reason?.kind === 'aborted',
         answerText: null,
@@ -4350,6 +4364,23 @@ export class FeishuHarnessBridge {
       });
   }
 
+  /**
+   * Persist the mirror state for a session-sync card after a successful
+   * render. Plain IM cards (no sessionSyncSessionId) are never recorded —
+   * their lifecycle is owned by the ask path, not the mirror recovery.
+   * lastContent keeps stepStreamCard's raw JSON string (single-encoded).
+   */
+  #persistMirrorState(card, liveBlocks, status) {
+    const sessionId = card.sessionSyncSessionId;
+    if (!sessionId || typeof this.#state.setMirror !== 'function') return;
+    void this.#state.setMirror(sessionId, {
+      chatId: card.chatId,
+      cardIds: card.cardIds,
+      claimedAt: Date.now(),
+      lastContent: stepStreamCard(liveBlocks, { status }),
+    });
+  }
+
   async #renderStepCardNow(chatId, card) {
     if (card.broken) return;
     const chunks = splitStepStreamCardBlocks(card.blocks);
@@ -4374,15 +4405,7 @@ export class FeishuHarnessBridge {
           if (isLive) card.messageId = id;
         }
         card.chunkCount = chunks.length;
-        // claimedAt is a LAST-ACTIVE timestamp: every successful render
-        // refreshes it, so startup recovery only seals entries that have
-        // been silent for the whole orphan threshold.
-        void this.#state.setMirror?.(card.sessionSyncSessionId ?? '', {
-          chatId: card.chatId,
-          cardIds: card.cardIds,
-          claimedAt: Date.now(),
-          lastContent: JSON.stringify(stepStreamCard(live, { status: 'running' })),
-        });
+        this.#persistMirrorState(card, live, 'running');
         card.lastRenderAt = this.#stepPushClock.now();
         card.renderedAnswerVersion = card.answerVersion ?? 0;
         return;
@@ -4408,15 +4431,7 @@ export class FeishuHarnessBridge {
           if (isLive) card.messageId = id;
         }
         card.chunkCount = chunks.length;
-        // claimedAt is a LAST-ACTIVE timestamp: every successful render
-        // refreshes it, so startup recovery only seals entries that have
-        // been silent for the whole orphan threshold.
-        void this.#state.setMirror?.(card.sessionSyncSessionId ?? '', {
-          chatId: card.chatId,
-          cardIds: card.cardIds,
-          claimedAt: Date.now(),
-          lastContent: JSON.stringify(stepStreamCard(live, { status: 'running' })),
-        });
+        this.#persistMirrorState(card, live, 'running');
       } else {
         await this.#patchStepCard(card.messageId, stepStreamCard(live, { status: 'running' }));
       }
@@ -4431,6 +4446,15 @@ export class FeishuHarnessBridge {
       if (card.deliveryViaOpenId) {
         this.#logger.warn?.('[dsh-feishu] session-sync mirror card render failed:',
           error?.message ?? String(error));
+        // Release the mirror claim at the FIRST failure so the plain-text
+        // coordinator takes over delivery for the rest of the turn (its
+        // user-echo suppression lifts immediately, and its recipients stay
+        // usable for the final answer fallback).
+        const sessionId = card.sessionSyncSessionId;
+        if (sessionId) {
+          releaseSessionSyncMirror(sessionId, card.sessionSyncTargetId ?? '');
+          void this.#state.clearMirror?.(sessionId);
+        }
       }
     }
   }
@@ -4834,7 +4858,7 @@ export class FeishuHarnessBridge {
    * （工具参数折叠为代码块）；post 失败走既有纯文本降级。
    */
   async #answerWithStepPush(event, key, message, { onAskComplete } = {}) {
-    this.#imTurnKeys.add(key);
+    this.#beginImTurn(key);
     const chatId = event.message.chat_id;
     const messageId = event.message.message_id;
     const text = message.content;
@@ -4842,7 +4866,7 @@ export class FeishuHarnessBridge {
     const markAskComplete = () => {
       if (askCompleted) return;
       askCompleted = true;
-      this.#imTurnKeys.delete(key);
+      this.#endImTurn(key);
       onAskComplete?.();
     };
     // 与流式分支一致的提示内容构造：图片与回复引用展开为富提示内容，已接受
@@ -5148,6 +5172,7 @@ export class FeishuHarnessBridge {
   }
 
   async #answerWithStream(event, key, message, { onAskComplete } = {}) {
+    this.#beginImTurn(key);
     const chatId = event.message.chat_id;
     const messageId = event.message.message_id;
     const text = message.content;
@@ -5155,7 +5180,7 @@ export class FeishuHarnessBridge {
     const markAskComplete = () => {
       if (askCompleted) return;
       askCompleted = true;
-      this.#imTurnKeys.delete(key);
+      this.#endImTurn(key);
       onAskComplete?.();
     };
     // 分步直推：开关开启且通道支持流式卡时，在构造提示内容之前分流到完整替
