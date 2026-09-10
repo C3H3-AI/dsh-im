@@ -743,7 +743,10 @@ export class FeishuHarnessBridge {
     if (typeof this.#harness?.watchHarnessEvents === 'function') {
       queueMicrotask(() => {
         this.#ensureEventWatcher();
-        void this.#sealOrphanMirrors();
+        // Delay the recovery: a restart lands while healthy turns may still
+        // be streaming; sealing them at t=0 would wipe live cards. 90s gives
+        // the turn's own events a window to re-adopt and finish normally.
+        setTimeout(() => { void this.#sealOrphanMirrors(); }, 90_000);
       });
     }
   }
@@ -4342,9 +4345,11 @@ export class FeishuHarnessBridge {
           if (isLive) card.messageId = id;
         }
         card.chunkCount = chunks.length;
+        const previous = this.#state.mirrorEntries?.().find(([sid]) => sid === card.sessionSyncSessionId)?.[1];
         void this.#state.setMirror?.(card.sessionSyncSessionId ?? '', {
           chatId: card.chatId,
           cardIds: card.cardIds,
+          claimedAt: previous?.claimedAt ?? Date.now(),
           lastContent: JSON.stringify(stepStreamCard(live, { status: 'running' })),
         });
         card.lastRenderAt = this.#stepPushClock.now();
@@ -4372,9 +4377,11 @@ export class FeishuHarnessBridge {
           if (isLive) card.messageId = id;
         }
         card.chunkCount = chunks.length;
+        const previous = this.#state.mirrorEntries?.().find(([sid]) => sid === card.sessionSyncSessionId)?.[1];
         void this.#state.setMirror?.(card.sessionSyncSessionId ?? '', {
           chatId: card.chatId,
           cardIds: card.cardIds,
+          claimedAt: previous?.claimedAt ?? Date.now(),
           lastContent: JSON.stringify(stepStreamCard(live, { status: 'running' })),
         });
       } else {
