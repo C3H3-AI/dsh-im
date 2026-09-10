@@ -646,6 +646,8 @@ export class FeishuHarnessBridge {
   #sessionSyncTargets = new Map();
   /** In-flight adopt lookups, deduped per session. */
   #sessionSyncAdopting = new Set();
+  /** Latest interim assistant text per mirrored session (folded on tool). */
+  #sessionSyncPendingStep = new Map();
   /** Conversation keys with an IM ask in flight (set BEFORE the turn starts). */
   #imTurnKeys = new Set();
   #cardDataTimeoutMs;
@@ -3767,13 +3769,20 @@ export class FeishuHarnessBridge {
         const excerpt = text.length > 400 ? `${text.slice(0, 399)}…` : text;
         await this.#appendStepCardUpdate(
           key, openId, null,
-          { kind: 'message', text: `> 💬 ${excerpt.replaceAll('\n', '\n> ')}` },
+          { kind: 'message', text: `> 👤 **我问：**${excerpt.replaceAll('\n', '\n> ')}` },
           { billable: false },
         );
       }
       return;
     }
     if (type === 'tool/call') {
+      // Align with the ask-callback semantics: a draft proven interim by a
+      // tool call folds into the thinking panel instead of being overwritten
+      // by the next draft.
+      if (this.#sessionSyncPendingStep.has(sessionId)) {
+        this.#morphStepCardAnswerToNote(key, this.#sessionSyncPendingStep.get(sessionId));
+        this.#sessionSyncPendingStep.delete(sessionId);
+      }
       await this.#appendStepCardUpdate(
         key, openId, null,
         this.#stepCardToolBlock({
@@ -3786,11 +3795,15 @@ export class FeishuHarnessBridge {
     }
     if (type === 'assistant/message') {
       const text = textFromHarnessContent(event?.data?.message?.content);
-      if (text.trim()) this.#streamStepCardAnswer(key, openId, null, text);
+      if (text.trim()) {
+        this.#sessionSyncPendingStep.set(sessionId, text);
+        this.#streamStepCardAnswer(key, openId, null, text);
+      }
       return;
     }
     if (type === 'turn/end') {
       this.#sessionSyncTargets.delete(sessionId);
+      this.#sessionSyncPendingStep.delete(sessionId);
       releaseSessionSyncMirror(sessionId);
       void this.#state.clearMirror?.(sessionId);
       await this.#finishStepCard(key, {
