@@ -31,6 +31,10 @@ import { HarnessApprovalQueue } from '../shared/harness-approval.mjs';
 import { textFromHarnessContent } from '../shared/harness-client.mjs';
 import { hasActiveHarnessInteractionOwner } from '../shared/harness-client.mjs';
 import {
+  claimSessionSyncMirror,
+  releaseSessionSyncMirror,
+} from '../shared/session-sync-registry.mjs';
+import {
   BatchInputManager,
   batchInputBusyMessage,
   batchInputGroupUnsupportedMessage,
@@ -2734,6 +2738,7 @@ export class FeishuHarnessBridge {
       }
       const sentId = nonEmptyString(response?.data?.message_id);
       if (!sentId) throw new Error('Feishu card send returned no message_id');
+      console.error('[dsh-feishu][verify] mirror card delivered:', sentId);
       return sentId;
     }
 
@@ -3650,6 +3655,9 @@ export class FeishuHarnessBridge {
       // chatId carries the openId; #sendCard branches on the delivery marker.
       this.#ensureStepCard(key, owned.openId, null);
       this.#stepCards.get(key).deliveryViaOpenId = true;
+      // Claim the turn so the plain-text session-sync coordinator suppresses
+      // its duplicate delivery while the mirror owns this session.
+      claimSessionSyncMirror(sessionId);
       return;
     }
 
@@ -3671,6 +3679,7 @@ export class FeishuHarnessBridge {
             // Adopt = open the mirror card NOW, then handle this event.
             this.#ensureStepCard(key, owned.openId, null);
             this.#stepCards.get(key).deliveryViaOpenId = true;
+            claimSessionSyncMirror(sessionId);
             return this.#feedSessionSyncTurn(sessionId, event);
           })
           .catch((error) => {
@@ -3700,6 +3709,7 @@ export class FeishuHarnessBridge {
     }
     if (type === 'turn/end') {
       this.#sessionSyncTargets.delete(sessionId);
+      releaseSessionSyncMirror(sessionId);
       await this.#finishStepCard(key, {
         stopped: event?.data?.reason?.kind === 'aborted',
         answerText: null,

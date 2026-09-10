@@ -3,6 +3,10 @@ import {
   consumeDshImInputOrigin,
   textFromHarnessContent,
 } from '../../src/channels/shared/harness-client.mjs';
+import {
+  isSessionSyncMirrored,
+  releaseSessionSyncMirror,
+} from '../../src/channels/shared/session-sync-registry.mjs';
 
 const DSH_USER_PREFIX = '[来自 DSH]\n';
 const DSH_ASSISTANT_PREFIX = '[DSH 助手]\n';
@@ -111,6 +115,9 @@ export function createSessionSyncCoordinator({ deliveryService, logger = console
       if (event.surfaceOp !== 'append') return;
       if (state.origin === 'unknown') state.origin = origin;
       if (state.origin !== 'dsh' || origin !== 'dsh') return;
+      // The process-card mirror owns this session: it renders the turn
+      // (including the user echo) as a card, so plain text would duplicate.
+      if (isSessionSyncMirrored(sessionId)) return;
       const text = textFromHarnessContent(event.data?.content);
       if (!text) return;
 
@@ -151,6 +158,12 @@ export function createSessionSyncCoordinator({ deliveryService, logger = console
     turns.delete(sessionId);
     if (state.origin !== 'dsh' || !completedTurn(event.data?.reason)
       || !state.recipients?.size || !state.assistant.text) return;
+    if (isSessionSyncMirrored(sessionId, state.turn)) {
+      // The mirror sealed the process card with the final answer; releasing
+      // here keeps the registry clean for the next turn.
+      releaseSessionSyncMirror(sessionId);
+      return;
+    }
     await deliver(
       sessionId,
       state.recipients.values(),
