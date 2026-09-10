@@ -3721,6 +3721,21 @@ export class FeishuHarnessBridge {
     }
     if (card.broken) return;
 
+    if (type === 'user/message' && event?.surfaceOp === 'append') {
+      // The coordinator's plain-text user echo is suppressed for mirrored
+      // turns, so the card carries the question itself: a quoted block at
+      // the top keeps the DM self-contained and readable in history.
+      const text = textFromHarnessContent(event?.data?.content);
+      if (text.trim()) {
+        const excerpt = text.length > 400 ? `${text.slice(0, 399)}…` : text;
+        await this.#appendStepCardUpdate(
+          key, openId, null,
+          { kind: 'message', text: `> 💬 ${excerpt.replaceAll('\n', '\n> ')}` },
+          { billable: false },
+        );
+      }
+      return;
+    }
     if (type === 'tool/call') {
       await this.#appendStepCardUpdate(
         key, openId, null,
