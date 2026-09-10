@@ -195,6 +195,8 @@ const STEP_PUSH_POST_CHUNK_MAX_BYTES = 24_000;
 /** Streaming-card mode coalesces card renders behind one PATCH per interval —
  *  patching the same message is far more rate sensitive than posting. */
 const STEP_STREAM_PATCH_MIN_INTERVAL_MS = 1_000;
+/** Mux doesn't forward turn/end; this idle gap seals the mirror card. */
+const MIRROR_IDLE_SEAL_MS = 90_000;
 /** One answer chunk inside the streaming card: small enough that the block
  *  splitter can always distribute blocks across sealed/live cards. */
 const STEP_STREAM_ANSWER_CHUNK_MAX_BYTES = 18_000;
@@ -648,6 +650,9 @@ export class FeishuHarnessBridge {
   #sessionSyncAdopting = new Set();
   /** Latest interim assistant text per mirrored session (folded on tool). */
   #sessionSyncPendingStep = new Map();
+  /** Idle-seal timers: no events for a while = the turn ended (mux may
+   * not forward turn/end), so seal the mirror card with what it has. */
+  #sessionSyncIdleTimers = new Map();
   /** Conversation keys with an IM ask in flight (set BEFORE the turn starts). */
   #imTurnKeys = new Set();
   #cardDataTimeoutMs;
@@ -3710,11 +3715,35 @@ export class FeishuHarnessBridge {
     return false;
   }
 
+  /**
+   * The session-event mux forwards surfaced events (user/tool/assistant) but
+   * NOT turn/start|turn/end, so the mirror cannot observe the turn boundary
+   * directly. Instead, arm an idle timer on every event: when no event
+   * arrives for MIRROR_IDLE_SEAL_MS, the turn is over — seal the card with
+   * its current content (answer draft included) as completed.
+   */
+  #armSessionSyncIdleTimer(sessionId, key, openId) {
+    const previous = this.#sessionSyncIdleTimers.get(sessionId);
+    if (previous) clearTimeout(previous);
+    const timer = setTimeout(() => {
+      this.#sessionSyncIdleTimers.delete(sessionId);
+      const card = this.#stepCards.get(key);
+      if (!card || card.broken) return;
+      void this.#finishStepCard(key, { stopped: false, answerText: null })
+        .then(() => this.#state.clearMirror?.(sessionId))
+        .catch((error) => {
+          console.error('[ss-final] idle seal failed:', error?.message ?? error);
+        });
+    }, MIRROR_IDLE_SEAL_MS);
+    this.#sessionSyncIdleTimers.set(sessionId, timer);
+  }
+
   async #feedSessionSyncTurn(sessionId, event) {
     if (this.#signal?.aborted) return;
     const key = `session-sync\0${sessionId}`;
     const type = event?.type;
     const openId = this.#sessionSyncTargets.get(sessionId);
+    this.#armSessionSyncIdleTimer(sessionId, key, openId);
 
     if (type === 'turn/start') {
       if (this.#stepCards.has(key)) {
