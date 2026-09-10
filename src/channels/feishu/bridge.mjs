@@ -3347,6 +3347,7 @@ export class FeishuHarnessBridge {
       this.#eventWatcher = this.#harness.watchHarnessEvents({
         signal,
         onSessionEvent: (payload) => {
+          console.error('[ss-final] mux:', payload?.sessionId?.slice(-12), payload?.event?.type);
           this.#onHarnessEvent(payload);
         },
         onReconnect: () => {
@@ -3816,11 +3817,14 @@ export class FeishuHarnessBridge {
       this.#sessionSyncTargets.delete(sessionId);
       this.#sessionSyncPendingStep.delete(sessionId);
       releaseSessionSyncMirror(sessionId);
-      void this.#state.clearMirror?.(sessionId);
       await this.#finishStepCard(key, {
         stopped: event?.data?.reason?.kind === 'aborted',
         answerText: null,
       });
+      // Clear AFTER the seal: the render chain may still write mirror state
+      // while it finishes, so clearing earlier would be resurrected by the
+      // trailing setMirror from the last successful render.
+      await this.#state.clearMirror?.(sessionId);
       return;
     }
   }
