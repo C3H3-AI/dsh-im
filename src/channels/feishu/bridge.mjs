@@ -768,7 +768,7 @@ export class FeishuHarnessBridge {
     // Only claim cards older than the threshold: a restart lands while a
     // healthy turn may still be streaming, and sealing it would wipe the
     // live card. Anything older than a turn could plausibly run is orphaned.
-    const ORPHAN_AFTER_MS = 10 * 60_000;
+    const ORPHAN_AFTER_MS = 3 * 60_000;
     for (const [sessionId, entry] of entries) {
       if (!entry?.chatId || !Array.isArray(entry.cardIds)) continue;
       if (typeof entry.claimedAt === 'number' && Date.now() - entry.claimedAt < ORPHAN_AFTER_MS) {
@@ -4374,11 +4374,13 @@ export class FeishuHarnessBridge {
           if (isLive) card.messageId = id;
         }
         card.chunkCount = chunks.length;
-        const previous = this.#state.mirrorEntries?.().find(([sid]) => sid === card.sessionSyncSessionId)?.[1];
+        // claimedAt is a LAST-ACTIVE timestamp: every successful render
+        // refreshes it, so startup recovery only seals entries that have
+        // been silent for the whole orphan threshold.
         void this.#state.setMirror?.(card.sessionSyncSessionId ?? '', {
           chatId: card.chatId,
           cardIds: card.cardIds,
-          claimedAt: previous?.claimedAt ?? Date.now(),
+          claimedAt: Date.now(),
           lastContent: JSON.stringify(stepStreamCard(live, { status: 'running' })),
         });
         card.lastRenderAt = this.#stepPushClock.now();
@@ -4406,11 +4408,13 @@ export class FeishuHarnessBridge {
           if (isLive) card.messageId = id;
         }
         card.chunkCount = chunks.length;
-        const previous = this.#state.mirrorEntries?.().find(([sid]) => sid === card.sessionSyncSessionId)?.[1];
+        // claimedAt is a LAST-ACTIVE timestamp: every successful render
+        // refreshes it, so startup recovery only seals entries that have
+        // been silent for the whole orphan threshold.
         void this.#state.setMirror?.(card.sessionSyncSessionId ?? '', {
           chatId: card.chatId,
           cardIds: card.cardIds,
-          claimedAt: previous?.claimedAt ?? Date.now(),
+          claimedAt: Date.now(),
           lastContent: JSON.stringify(stepStreamCard(live, { status: 'running' })),
         });
       } else {
