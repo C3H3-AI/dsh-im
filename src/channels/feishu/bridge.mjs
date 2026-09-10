@@ -102,6 +102,7 @@ import {
   steerCard,
   watchListCard,
   workspaceListCard,
+  stepStatusText,
 } from './feishu-cards.mjs';
 import { t } from '../shared/i18n.mjs';
 import { MAX_WATCHES_PER_KEY } from './state-store.mjs';
@@ -756,8 +757,44 @@ export class FeishuHarnessBridge {
       : [];
     for (const [sessionId, entry] of entries) {
       if (!entry?.chatId || !Array.isArray(entry.cardIds)) continue;
-      for (const messageId of entry.cardIds) {
-        await this.#patchStepCard(messageId, stepStreamCard([], { status: 'stopped' }))
+      // The live card's last delivered content is persisted with the mirror:
+      // re-patch it with a stopped status line, keeping every panel intact.
+      let sealContent = null;
+      if (typeof entry.lastContent === 'string' && entry.lastContent) {
+        try {
+          const parsed = JSON.parse(entry.lastContent);
+          const elements = parsed?.body?.elements;
+          if (Array.isArray(elements) && elements.length > 0) {
+            const last = elements[elements.length - 1];
+            if (last?.tag === 'markdown' && typeof last.content === 'string'
+              && last.content.startsWith('_') && last.content.endsWith('_')) {
+              last.content = `_${stepStatusText('stopped')}_`;
+            } else {
+              elements.push({ tag: 'markdown', content: `_${stepStatusText('stopped')}_` });
+            }
+            sealContent = parsed;
+          }
+        } catch { /* fall through to an empty stopped card */ }
+      }
+      for (let index = 0; index < entry.cardIds.length; index += 1) {
+        const content = index === entry.cardIds.length - 1 && sealContent
+          ? JSON.stringify(sealContent)
+          : stepStreamCard([], { status: 'stopped' });
+        await this.#patchStepCard(entry.cardIds[index], content)
+          .catch((error) => {
+            this.#logger.warn?.('[dsh-feishu] orphan mirror seal failed:', error?.message ?? error);
+          });
+      }
+      for (let index = 0; index < entry.cardIds.length; index += 1) {
+        const isLive = index === entry.cardIds.length - 1;
+        const content = isLive
+          ? (sealContent
+            ? JSON.stringify({ ...sealContent, data: JSON.stringify({
+              ...(JSON.parse(entry.lastContent).data ? JSON.parse(entry.lastContent).data : {}),
+            }) })
+            : stepStreamCard([], { status: 'stopped' }))
+          : stepStreamCard([], { status: 'stopped' });
+        await this.#patchStepCard(entry.cardIds[index], content)
           .catch((error) => {
             this.#logger.warn?.('[dsh-feishu] orphan mirror seal failed:', error?.message ?? error);
           });
@@ -4273,7 +4310,11 @@ export class FeishuHarnessBridge {
           if (isLive) card.messageId = id;
         }
         card.chunkCount = chunks.length;
-        void this.#state.setMirror?.(card.sessionSyncSessionId ?? '', { chatId: card.chatId, cardIds: card.cardIds });
+        void this.#state.setMirror?.(card.sessionSyncSessionId ?? '', {
+          chatId: card.chatId,
+          cardIds: card.cardIds,
+          lastContent: JSON.stringify(stepStreamCard(live, { status: 'running' })),
+        });
         card.lastRenderAt = this.#stepPushClock.now();
         card.renderedAnswerVersion = card.answerVersion ?? 0;
         return;
@@ -4299,7 +4340,11 @@ export class FeishuHarnessBridge {
           if (isLive) card.messageId = id;
         }
         card.chunkCount = chunks.length;
-        void this.#state.setMirror?.(card.sessionSyncSessionId ?? '', { chatId: card.chatId, cardIds: card.cardIds });
+        void this.#state.setMirror?.(card.sessionSyncSessionId ?? '', {
+          chatId: card.chatId,
+          cardIds: card.cardIds,
+          lastContent: JSON.stringify(stepStreamCard(live, { status: 'running' })),
+        });
       } else {
         await this.#patchStepCard(card.messageId, stepStreamCard(live, { status: 'running' }));
       }
