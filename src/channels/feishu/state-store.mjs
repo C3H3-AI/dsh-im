@@ -46,6 +46,7 @@ export class StateStore {
           ? parsed.includeArchivedSessions
           : false,
         topics: parsed.topics && typeof parsed.topics === 'object' ? parsed.topics : {},
+        mirrors: parsed.mirrors && typeof parsed.mirrors === 'object' ? parsed.mirrors : {},
       };
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
@@ -58,6 +59,21 @@ export class StateStore {
   putDeferred(entry) { return this.#deferred.put(entry); }
   patchDeferred(id, patch) { return this.#deferred.patch(id, patch); }
   removeDeferred(id) { return this.#deferred.remove(id); }
+
+  // ── Mirrors (persisted: open session-sync cards, recovered at startup) ──
+  setMirror(sessionId, entry) {
+    this.#state.mirrors[sessionId] = entry;
+    return this.#persist();
+  }
+
+  clearMirror(sessionId) {
+    delete this.#state.mirrors[sessionId];
+    return this.#persist();
+  }
+
+  mirrorEntries() {
+    return Object.entries(this.#state.mirrors ?? {});
+  }
 
   sessionFor(key) {
     return this.#state.sessions[key] ?? null;

@@ -740,7 +740,32 @@ export class FeishuHarnessBridge {
     if (typeof this.#harness?.watchHarnessEvents === 'function') {
       queueMicrotask(() => {
         this.#ensureEventWatcher();
+        void this.#sealOrphanMirrors();
       });
+    }
+  }
+
+  /**
+   * Seal mirrors left running by a previous process: a restart kills the
+   * turn without a turn/end event, so the persisted card would stay
+   * "running" forever. Mark each orphan sealed (stopped) on delivery.
+   */
+  async #sealOrphanMirrors() {
+    const entries = typeof this.#state.mirrorEntries === 'function'
+      ? this.#state.mirrorEntries()
+      : [];
+    for (const [sessionId, entry] of entries) {
+      if (!entry?.chatId || !Array.isArray(entry.cardIds)) continue;
+      for (const messageId of entry.cardIds) {
+        await this.#patchStepCard(messageId, stepStreamCard([], { status: 'stopped' }))
+          .catch((error) => {
+            this.#logger.warn?.('[dsh-feishu] orphan mirror seal failed:', error?.message ?? error);
+          });
+      }
+      await this.#state.clearMirror?.(sessionId);
+      this.#logger.warn?.(
+        `[dsh-feishu] sealed ${entry.cardIds.length} orphan mirror card(s) for ${sessionId}`,
+      );
     }
   }
 
@@ -3655,6 +3680,9 @@ export class FeishuHarnessBridge {
       // chatId carries the openId; #sendCard branches on the delivery marker.
       this.#ensureStepCard(key, owned.openId, null);
       this.#stepCards.get(key).deliveryViaOpenId = true;
+      this.#stepCards.get(key).sessionSyncSessionId = sessionId;
+      // Persist the mirror so a restart can seal an orphaned running card.
+      await this.#state.setMirror?.(sessionId, { chatId: owned.openId, cardIds: [] });
       // Claim the turn so the plain-text session-sync coordinator suppresses
       // its duplicate delivery while the mirror owns this session.
       claimSessionSyncMirror(sessionId);
@@ -3679,6 +3707,8 @@ export class FeishuHarnessBridge {
             // Adopt = open the mirror card NOW, then handle this event.
             this.#ensureStepCard(key, owned.openId, null);
             this.#stepCards.get(key).deliveryViaOpenId = true;
+            this.#stepCards.get(key).sessionSyncSessionId = sessionId;
+            void this.#state.setMirror?.(sessionId, { chatId: owned.openId, cardIds: [] });
             claimSessionSyncMirror(sessionId);
             return this.#feedSessionSyncTurn(sessionId, event);
           })
@@ -3710,6 +3740,7 @@ export class FeishuHarnessBridge {
     if (type === 'turn/end') {
       this.#sessionSyncTargets.delete(sessionId);
       releaseSessionSyncMirror(sessionId);
+      void this.#state.clearMirror?.(sessionId);
       await this.#finishStepCard(key, {
         stopped: event?.data?.reason?.kind === 'aborted',
         answerText: null,
@@ -4227,6 +4258,7 @@ export class FeishuHarnessBridge {
           if (isLive) card.messageId = id;
         }
         card.chunkCount = chunks.length;
+        void this.#state.setMirror?.(card.sessionSyncSessionId ?? '', { chatId: card.chatId, cardIds: card.cardIds });
         card.lastRenderAt = this.#stepPushClock.now();
         card.renderedAnswerVersion = card.answerVersion ?? 0;
         return;
@@ -4252,6 +4284,7 @@ export class FeishuHarnessBridge {
           if (isLive) card.messageId = id;
         }
         card.chunkCount = chunks.length;
+        void this.#state.setMirror?.(card.sessionSyncSessionId ?? '', { chatId: card.chatId, cardIds: card.cardIds });
       } else {
         await this.#patchStepCard(card.messageId, stepStreamCard(live, { status: 'running' }));
       }
