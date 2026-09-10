@@ -757,8 +757,16 @@ export class FeishuHarnessBridge {
     const entries = typeof this.#state.mirrorEntries === 'function'
       ? this.#state.mirrorEntries()
       : [];
+    // Only claim cards older than the threshold: a restart lands while a
+    // healthy turn may still be streaming, and sealing it would wipe the
+    // live card. Anything older than a turn could plausibly run is orphaned.
+    const ORPHAN_AFTER_MS = 10 * 60_000;
     for (const [sessionId, entry] of entries) {
       if (!entry?.chatId || !Array.isArray(entry.cardIds)) continue;
+      if (typeof entry.claimedAt === 'number' && Date.now() - entry.claimedAt < ORPHAN_AFTER_MS) {
+        this.#logger.warn?.('[dsh-feishu] mirror entry too fresh to be orphaned; leaving untouched:', sessionId);
+        continue;
+      }
       // The live card's last delivered content is persisted with the mirror:
       // re-patch it with a stopped status line, keeping every panel intact.
       let sealContent = null;
@@ -3721,7 +3729,7 @@ export class FeishuHarnessBridge {
       this.#stepCards.get(key).deliveryViaOpenId = true;
       this.#stepCards.get(key).sessionSyncSessionId = sessionId;
       // Persist the mirror so a restart can seal an orphaned running card.
-      await this.#state.setMirror?.(sessionId, { chatId: owned.openId, cardIds: [] });
+      await this.#state.setMirror?.(sessionId, { chatId: owned.openId, cardIds: [], claimedAt: Date.now() });
       // Claim the turn so the plain-text session-sync coordinator suppresses
       // its duplicate delivery while the mirror owns this session.
       claimSessionSyncMirror(sessionId);
@@ -3747,7 +3755,7 @@ export class FeishuHarnessBridge {
             this.#ensureStepCard(key, owned.openId, null);
             this.#stepCards.get(key).deliveryViaOpenId = true;
             this.#stepCards.get(key).sessionSyncSessionId = sessionId;
-            void this.#state.setMirror?.(sessionId, { chatId: owned.openId, cardIds: [] });
+            void this.#state.setMirror?.(sessionId, { chatId: owned.openId, cardIds: [], claimedAt: Date.now() });
             claimSessionSyncMirror(sessionId);
             return this.#feedSessionSyncTurn(sessionId, event);
           })
