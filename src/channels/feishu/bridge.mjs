@@ -772,7 +772,10 @@ export class FeishuHarnessBridge {
       let sealContent = null;
       if (typeof entry.lastContent === 'string' && entry.lastContent) {
         try {
-          const parsed = JSON.parse(entry.lastContent);
+          // setMirror stored the card double-encoded (JSON.stringify of the
+          // JSON string) — unwrap until an object with body.elements appears.
+          let parsed = JSON.parse(entry.lastContent);
+          while (typeof parsed === 'string') parsed = JSON.parse(parsed);
           const elements = parsed?.body?.elements;
           if (Array.isArray(elements) && elements.length > 0) {
             const last = elements[elements.length - 1];
@@ -3836,9 +3839,14 @@ export class FeishuHarnessBridge {
     // IM-opened turns are skipped — they already own their card via the ask
     // callbacks. turn/end ALSO continues below for watch completions.
     if (this.#sessionSyncTargetsFor) {
+      if (event.type === 'turn/end') {
+        console.error('[ss-final] turn/end reached dispatcher:', sessionId);
+      }
       void this.#queueEventTask(`session-sync\0${sessionId}`, async () => {
         await this.#feedSessionSyncTurn(sessionId, event);
-      }).catch(() => {});
+      }).catch((error) => {
+        console.error('[ss-final] mirror task failed:', event?.type, error?.message ?? error);
+      });
       if (event.type !== 'turn/end') return;
     }
     if (event.type !== 'turn/end') return;
