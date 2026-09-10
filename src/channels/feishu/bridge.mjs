@@ -2813,7 +2813,6 @@ export class FeishuHarnessBridge {
       }
       const sentId = nonEmptyString(response?.data?.message_id);
       if (!sentId) throw new Error('Feishu card send returned no message_id');
-      console.error('[dsh-feishu][verify] mirror card delivered:', sentId);
       return sentId;
     }
 
