@@ -208,6 +208,7 @@ test('IM settings renders twelve IM channels plus the AI Office connector', asyn
     discordRpcCall: async () => ({ ok: true, value: {} }),
     whatsappRpcCall: async () => ({ ok: true, value: {} }),
     imessageRpcCall: async () => ({ ok: true, value: {} }),
+    emailRpcCall: async () => ({ ok: true, value: {} }),
     officeRpcCall: async () => ({ ok: true, value: {} }),
   }));
 
@@ -1541,4 +1542,27 @@ test('all nine channel settings and connected cards render English copy', () => 
   } finally {
     setImTranslator(null);
   }
+});
+
+test('every channel tab receives its RPC call from the settings render site', async () => {
+  // Regression guard: the render site lists one prop per channel by hand. When
+  // a new channel was added to the tab list but not to that list, its settings
+  // page mounted without an RPC call and rendered "missing RPC connection".
+  const source = await readFile(new URL('index.js', CLIENT_SOURCE_DIRECTORY_URL), 'utf8');
+  const tabIds = [...source.matchAll(/\{\s*id:\s*'([a-zA-Z]+)',\s*label:/g)].map(m => m[1]);
+  assert.ok(tabIds.length >= 12, `expected the channel tab list, found ${tabIds.length}`);
+
+  // Parse the exact `inject: () => ({ ... })` block that feeds IMSettingsTab.
+  const renderSite = source.indexOf('}, IMSettingsTab));');
+  assert.ok(renderSite > 0, 'the IMSettingsTab render site must exist');
+  const injectStart = source.lastIndexOf('inject: () => ({', renderSite);
+  assert.ok(injectStart > 0, 'the settings tab inject block must exist');
+  const injectBlock = source.slice(injectStart, source.indexOf('})', injectStart));
+  const providedProps = new Set(
+    [...injectBlock.matchAll(/([a-zA-Z]+RpcCall)\s*,/g)].map(m => m[1]),
+  );
+  const missing = tabIds
+    .map((id) => `${id}RpcCall`)
+    .filter((name) => !providedProps.has(name));
+  assert.deepEqual(missing, [], 'every channel tab must receive its RPC call prop');
 });

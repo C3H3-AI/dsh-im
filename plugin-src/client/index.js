@@ -508,6 +508,7 @@ export function apply(ctx) {
       weixinRpcCall,
       whatsappRpcCall,
       imessageRpcCall,
+      emailRpcCall,
       officeRpcCall,
       updateRpcCall,
       deliveryRpcCall,
