@@ -104,7 +104,9 @@ export class EmailController {
     const identity = deriveEmailBotIdentity(normalizedAddress);
     await this.#withBotTransition(identity.botId, async () => {
       const previousConfig = this.#configStore.getByPlatformId(normalizedAddress);
-      const previousCredential = await this.#credentials.resolve(identity.tokenRef).catch(() => undefined);
+      // resolve() returns a wrapper; the plain secret lives on .value.
+      const previousResult = await this.#credentials.resolve(identity.tokenRef).catch(() => undefined);
+      const previousCredential = previousResult?.value;
       const probe = this.#createApi({
         config: { address: normalizedAddress, password, ...security },
       });
@@ -223,7 +225,16 @@ export class EmailController {
   status() {
     const bots = this.#configStore.list().map((config) => {
       const runtime = this.#runtimes.get(config.botId);
+      const runtimeStatus = runtime?.status ?? null;
       const error = this.#errors.get(config.botId);
+      // The connection supervisor and the settings client both read these
+      // fields, so a mailbox reports connectivity the same way every other
+      // token channel does.
+      const connected = runtimeStatus?.ready === true
+        && runtimeStatus.connectionState === 'connected';
+      const state = connected ? 'connected'
+        : error ? 'error'
+          : runtimeStatus?.connectionState === 'connecting' ? 'connecting' : 'disconnected';
       return {
         botId: config.botId,
         // The raw address is already semi-public, but the UI shows the masked
@@ -238,11 +249,25 @@ export class EmailController {
         allowedSenders: config.allowedSenders ?? [],
         createdAt: config.createdAt,
         connectedAt: config.connectedAt,
+        connected,
+        configured: true,
+        state,
+        health: {
+          status: connected ? 'healthy' : state === 'error' ? 'error' : 'offline',
+          summary: connected
+            ? t('邮箱通道运行正常')
+            : error?.message ?? t('邮箱通道尚未连接'),
+        },
         ...(error ? { error } : {}),
-        runtime: runtime?.status ?? null,
+        runtime: runtimeStatus,
       };
     });
-    return { revision: this.#revision, bots };
+    const connectedCount = bots.filter((bot) => bot.connected).length;
+    return {
+      revision: this.#revision,
+      bots,
+      totals: { configured: bots.length, connected: connectedCount },
+    };
   }
 
   /**
@@ -270,12 +295,19 @@ export class EmailController {
     return config;
   }
 
+  /**
+   * The credential provider resolves a ref to a wrapper object whose payload
+   * lives on `.value` (the same contract the shared token controller uses), so
+   * the stored JSON is unwrapped from there rather than parsed directly.
+   */
   async #resolveSecrets(config) {
-    const raw = await this.#credentials.resolve(config.tokenRef).catch(() => undefined);
-    if (!raw) return null;
+    const result = await this.#credentials.resolve(config.tokenRef).catch(() => undefined);
+    const stored = result?.value;
+    if (typeof stored !== 'string' || !stored) return null;
     try {
-      const parsed = JSON.parse(raw);
-      return normalizeCredential(parsed);
+      // The mailbox secret is stored as JSON so one ref carries the address
+      // and the app password together.
+      return normalizeCredential(JSON.parse(stored));
     } catch {
       return null;
     }
@@ -306,9 +338,13 @@ export class EmailController {
     });
   }
 
+  /** Roll a credential ref back to its previous plain value, or clear it. */
   async #restoreCredential(tokenRef, previous) {
-    if (previous === undefined) await this.#credentials.unset(tokenRef).catch(() => {});
-    else await this.#credentials.set(tokenRef, previous).catch(() => {});
+    if (typeof previous !== 'string' || !previous) {
+      await this.#credentials.unset(tokenRef).catch(() => {});
+      return;
+    }
+    await this.#credentials.set(tokenRef, previous).catch(() => {});
   }
 
   #safeError(code, error) {

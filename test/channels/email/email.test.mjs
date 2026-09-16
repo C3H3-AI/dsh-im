@@ -209,3 +209,44 @@ test('EmailStateStore bounds the remembered thread-id map', () => {
   assert.equal(state.conversationForThreadId('<m0@mail>'), null);
   assert.equal(state.threadMap.size, 2_000);
 });
+
+test('EmailController reads the mailbox secret from the credential wrapper', async () => {
+  // Regression guard: parameters.resolve() returns a wrapper whose payload is
+  // on `.value`. Parsing the wrapper itself threw and was swallowed, so the
+  // mailbox looked configured while its runtime never started.
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-cred-'));
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    await store.save({
+      platformId: 'user@qq.com',
+      name: 'user@qq.com',
+      provider: 'qq',
+      allowedSenders: ['boss@example.com'],
+    });
+    const [bot] = store.list();
+    const started = [];
+    const controller = new EmailController({
+      credentials: {
+        // Mirror the real provider: a wrapper object, not a bare string.
+        async resolve() { return { value: JSON.stringify({ address: 'user@qq.com', password: 'app-pass' }) }; },
+        async set() {},
+        async unset() {},
+      },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      createRuntime: async ({ botId, config, token }) => {
+        started.push({ botId, password: token });
+        return { start: async () => {}, stop: async () => {}, status: { ready: true, connectionState: 'connected' } };
+      },
+    });
+    await controller.initialize();
+    assert.equal(started.length, 1, 'the mailbox runtime must start when the secret resolves');
+    assert.equal(started[0].password, 'app-pass');
+    const status = controller.status();
+    assert.deepEqual(status.totals, { configured: 1, connected: 1 });
+    assert.equal(status.bots[0].connected, true);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});

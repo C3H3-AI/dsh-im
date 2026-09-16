@@ -3,7 +3,29 @@ import { EmailHarnessClient } from '../../../../src/channels/email/harness-clien
 import { EmailStateStore } from '../../../../src/channels/email/state-store.mjs';
 import { EmailController } from '../../../../src/channels/email/email-controller.mjs';
 import { EmailRuntime } from '../../../../src/channels/email/email-runtime.mjs';
+import {
+  createAccessPolicy,
+  createAccessPolicyScope,
+} from '../../../../src/channels/shared/access-policy.mjs';
 import { createTokenProductionController } from '../shared/production.mjs';
+
+/**
+ * Email has no group concept, and a mail address is trivially forgeable, so
+ * both scopes start as an allowlist seeded from the mailbox's configured
+ * senders instead of the open baseline other token channels use. With no
+ * senders configured the allowlist is empty, which denies everyone until the
+ * user adds one — the channel fails closed.
+ */
+function emailAccessPolicyFor(bot) {
+  const senders = Array.isArray(bot?.allowedSenders) ? bot.allowedSenders : [];
+  const scope = createAccessPolicyScope({
+    mode: 'allowlist',
+    open: { defaultCanExecuteCommands: false, commandPermissionOverrides: [] },
+    // Every policy user entry carries its command permission alongside the id.
+    allowlist: { users: senders.map((id) => ({ id, canExecuteCommands: true })) },
+  });
+  return createAccessPolicy({ direct: scope, group: scope });
+}
 
 /**
  * Email is a token-shaped channel: one mailbox identity plus one secret. It
@@ -22,9 +44,6 @@ export function createProductionController(ctx, config = {}, internals = {}) {
       ...(channelConfig.pollIntervalMs === undefined
         ? {} : { pollIntervalMs: channelConfig.pollIntervalMs }),
     }),
-    // Email fails closed: without an allowlist the mailbox must not act on
-    // instructions, so the seed policy is an explicit empty allowlist rather
-    // than the fully-open baseline most token channels use.
-    initialAccessPolicyForBot: () => ({ allowedSenders: [] }),
+    initialAccessPolicyForBot: emailAccessPolicyFor,
   });
 }

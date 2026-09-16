@@ -14,4 +14,6 @@ export default Object.freeze({
     'The mailbox credential is missing; please bind the mailbox again',
   '邮箱尚未连接': 'The mailbox is not connected yet',
   '邮箱通道连接正常。': 'The Email channel is connected.',
+  '邮箱通道运行正常': 'The Email channel is running normally',
+  '邮箱通道尚未连接': 'The Email channel is not connected yet',
 });
