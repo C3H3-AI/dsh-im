@@ -1566,3 +1566,23 @@ test('every channel tab receives its RPC call from the settings render site', as
     .filter((name) => !providedProps.has(name));
   assert.deepEqual(missing, [], 'every channel tab must receive its RPC call prop');
 });
+
+test('the Email settings form forwards every mailbox field to the bind RPC', async () => {
+  // Regression guard: credentialPayload reduced the form values to an empty
+  // object, so the Host received no address and rejected a valid mailbox with
+  // "邮箱地址格式不正确". The payload must reach the RPC intact.
+  const { EMAIL_SETTINGS_DEFINITION } = await import(
+    '../plugin-src/client/channels/email/index.js'
+  );
+  const values = {
+    address: 'user@qq.com',
+    password: 'app-password',
+    provider: 'qq',
+    allowedSenders: ['boss@example.com'],
+  };
+  assert.deepEqual(
+    EMAIL_SETTINGS_DEFINITION.credentialPayload(values),
+    values,
+    'the mailbox form payload must pass through unchanged',
+  );
+});

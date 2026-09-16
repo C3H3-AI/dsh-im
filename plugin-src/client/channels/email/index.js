@@ -134,7 +134,7 @@ function MailboxSettings({ account, busy, error, onSave, onCancel }) {
       }, busy ? '正在保存…' : '保存')));
 }
 
-const channel = createTokenChannelSettings({
+export const EMAIL_SETTINGS_DEFINITION = Object.freeze({
   channel: 'Email',
   endpoints: EMAIL_ENDPOINTS,
   api: emailClientApi,
@@ -147,7 +147,10 @@ const channel = createTokenChannelSettings({
   emptyTitle: '接入邮箱',
   emptyDescription: '使用现有邮箱收发指令：邮件进来触发 Harness，处理结果以回信形式送达。',
   platformLabel: '邮箱地址',
-  credentialPayload: () => ({}),
+  // The mailbox form supplies every field itself: the address is the identity
+  // and the password is the secret, so the values pass through unchanged
+  // rather than being reduced to a single token.
+  credentialPayload: (values) => values,
   CredentialPanel: MailboxPanel,
   credentialAriaLabel: '配置邮箱收发',
   credentialOpenLabel: '配置邮箱',
@@ -156,6 +159,8 @@ const channel = createTokenChannelSettings({
   AccountSettings: MailboxSettings,
   accountSettingsEndpoint: EMAIL_ENDPOINTS.updateMailbox,
 });
+
+const channel = createTokenChannelSettings(EMAIL_SETTINGS_DEFINITION);
 
 export const EmailSettingsTab = channel.SettingsTab;
 export const EmailAccountCard = channel.AccountCard;
