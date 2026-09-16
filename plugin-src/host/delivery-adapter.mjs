@@ -16,6 +16,7 @@ const CHANNELS = new Set([
   'discord',
   'whatsapp',
   'imessage',
+  'email',
 ]);
 
 export function supportsDeliveryChannel(channel) {
@@ -126,6 +127,16 @@ function normalizeRoute(channel, kind, route) {
     case 'imessage':
       oneOf(kind, ['user']);
       return routeWithStrings(route, ['chatGuid']);
+    case 'email': {
+      oneOf(kind, ['user']);
+      const normalized = routeWithStrings(route, ['address']);
+      // Mail addresses are normalized to lower case everywhere so a target
+      // created from a mixed-case address still matches.
+      if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(normalized.address)) {
+        throw invalidTarget('route.address must be a valid email address');
+      }
+      return { address: normalized.address.toLowerCase() };
+    }
     default:
       throw new TypeError(`Unsupported delivery channel: ${channel}`);
   }

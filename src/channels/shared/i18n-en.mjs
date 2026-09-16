@@ -17,6 +17,7 @@ import telegram from './i18n-en/telegram.mjs';
 import discord from './i18n-en/discord.mjs';
 import whatsapp from './i18n-en/whatsapp.mjs';
 import office from './i18n-en/office.mjs';
+import email from './i18n-en/email.mjs';
 
 export const EN = Object.freeze(Object.assign(
   {},
@@ -34,4 +35,5 @@ export const EN = Object.freeze(Object.assign(
   discord,
   whatsapp,
   office,
+  email,
 ));

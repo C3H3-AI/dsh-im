@@ -1,0 +1,77 @@
+import { createTokenBotRpcHandler } from '../shared/rpc.mjs';
+import { registerManagementRpc } from '../../../management-rpc.mjs';
+import { resolveRpcAuthority } from '../../rpc-authority.mjs';
+
+export const EMAIL_RPC_CHANNEL = '/email';
+export const EMAIL_ENDPOINTS = Object.freeze({
+  status: 'connection.status',
+  bindMailbox: 'bot.bind-mailbox',
+  updateMailbox: 'bot.mailbox.update',
+  reconnectBot: 'bot.reconnect',
+  deleteBot: 'bot.delete',
+  setWorkspace: 'bot.workspace.set',
+  setModel: 'bot.model.set',
+  setAgentPreset: 'bot.agent-preset.set',
+  setContextEnhancement: 'bot.context-enhancement.set',
+  setAccessPolicy: 'bot.access-policy.set',
+  setAlias: 'bot.alias.set',
+});
+export const EMAIL_RPC_ENDPOINTS = Object.freeze(Object.values(EMAIL_ENDPOINTS));
+
+function withRpcDetails(result) {
+  if (result?.ok !== false) return result;
+  return { ...result, error: { ...result.error, details: result.error?.details ?? {} } };
+}
+
+/**
+ * Mailbox-specific endpoints are handled here; everything else (status,
+ * reconnect, delete, workspace, model, preset, alias, access policy) goes
+ * through the shared token-bot handler, which already knows the endpoint
+ * payload shapes.
+ */
+export function createEmailRpcHandler(controller) {
+  const shared = createTokenBotRpcHandler(controller, { channel: 'Email' });
+  return async (endpoint, payload, signal) => {
+    if (endpoint === EMAIL_ENDPOINTS.bindMailbox) {
+      try {
+        return { ok: true, value: await controller.bindMailbox(payload ?? {}) };
+      } catch (error) {
+        return withRpcDetails({
+          ok: false,
+          error: {
+            code: error?.code ?? 'email-bind-failed',
+            message: error?.message ?? String(error),
+            details: error?.details ?? {},
+          },
+        });
+      }
+    }
+    if (endpoint === EMAIL_ENDPOINTS.updateMailbox) {
+      try {
+        return {
+          ok: true,
+          value: await controller.updateMailboxSettings(payload?.botId, payload?.update ?? {}),
+        };
+      } catch (error) {
+        return withRpcDetails({
+          ok: false,
+          error: {
+            code: error?.code ?? 'email-update-failed',
+            message: error?.message ?? String(error),
+            details: error?.details ?? {},
+          },
+        });
+      }
+    }
+    return withRpcDetails(await shared(endpoint, payload, signal));
+  };
+}
+
+export function installEmailRpc(ctx, controller, authority) {
+  return registerManagementRpc(
+    ctx,
+    EMAIL_RPC_CHANNEL,
+    createEmailRpcHandler(controller),
+    { authority: resolveRpcAuthority(authority) },
+  );
+}

@@ -14,6 +14,7 @@ import {
   WeixinLogoGlyph,
   WhatsappLogoGlyph,
   IMessageLogoGlyph,
+  EmailLogoGlyph,
 } from './channel-logos.js';
 import { DINGTALK_RPC_CHANNEL } from './channels/dingtalk/api.js';
 import { DingtalkSettingsTab } from './channels/dingtalk/index.js';
@@ -48,8 +49,11 @@ import { WHATSAPP_RPC_CHANNEL } from './channels/whatsapp/api.js';
 import { WhatsappSettingsTab } from './channels/whatsapp/index.js';
 import { installWhatsappStyles } from './channels/whatsapp/styles.js';
 import { IMESSAGE_RPC_CHANNEL } from './channels/imessage/api.js';
+import { EMAIL_RPC_CHANNEL } from './channels/email/api.js';
 import { IMessageSettingsTab } from './channels/imessage/index.js';
+import { EmailSettingsTab } from './channels/email/index.js';
 import { installIMessageStyles } from './channels/imessage/styles.js';
+import { installEmailStyles } from './channels/email/styles.js';
 import { en, h, IM_LOCALE_NAMESPACE, setImTranslator, zh } from './i18n.js';
 import {
   HOST_LANGUAGE_RPC_CHANNEL,
@@ -101,6 +105,7 @@ const CHANNELS = Object.freeze([
   { id: 'whatsapp', label: 'WhatsApp' },
   { id: 'wecomApp', label: '企业微信应用', note: '（实验功能）' },
   { id: 'imessage', label: 'iMessage', note: '（实验功能）' },
+  { id: 'email', label: '邮箱', note: '（实验功能）' },
   { id: 'office', label: 'AI Office', note: '（实验功能）' },
 ]);
 
@@ -156,6 +161,11 @@ function IMessageLogo() {
     h(IMessageLogoGlyph));
 }
 
+function EmailLogo() {
+  return h('span', { className: 'dim-logo dim-logoEmail', 'aria-hidden': 'true' },
+    h(EmailLogoGlyph));
+}
+
 function OfficeLogo() {
   return h('span', { className: 'dim-logo dim-logoOffice', 'aria-hidden': 'true' },
     h(OfficeLogoGlyph));
@@ -173,6 +183,7 @@ function ChannelLogo({ channel }) {
   if (channel === 'discord') return h(DiscordLogo);
   if (channel === 'whatsapp') return h(WhatsappLogo);
   if (channel === 'imessage') return h(IMessageLogo);
+  if (channel === 'email') return h(EmailLogo);
   return h(OfficeLogo);
 }
 
@@ -197,6 +208,7 @@ export function IMSettingsTab({
   discordRpcCall,
   feishuRpcCall,
   imessageRpcCall,
+  emailRpcCall,
   qqRpcCall,
   slackRpcCall,
   telegramRpcCall,
@@ -248,6 +260,7 @@ export function IMSettingsTab({
     deliveryRpcCall,
     globalSettingsRpcCall,
     imessageRpcCall,
+    emailRpcCall,
   }, {
     location: browserLocation,
     onRecovery: reportLoopbackRecovery,
@@ -259,6 +272,7 @@ export function IMSettingsTab({
     feishuRpcCall,
     globalSettingsRpcCall,
     imessageRpcCall,
+    emailRpcCall,
     officeRpcCall,
     qqRpcCall,
     reportLoopbackRecovery,
@@ -389,6 +403,8 @@ export function IMSettingsTab({
                           ? h(WhatsappSettingsTab, { rpcCall: rpcCalls.whatsappRpcCall })
                           : active.id === 'imessage'
                             ? h(IMessageSettingsTab, { rpcCall: rpcCalls.imessageRpcCall })
+                          : active.id === 'email'
+                            ? h(EmailSettingsTab, { rpcCall: rpcCalls.emailRpcCall })
                           : h(OfficeSettingsTab, { rpcCall: rpcCalls.officeRpcCall }))),
     ),
   ));
@@ -427,6 +443,7 @@ export function apply(ctx) {
       installDiscordStyles(),
       installWhatsappStyles(),
       installIMessageStyles(),
+      installEmailStyles(),
       installOfficeStyles(),
       installImStyles(),
     ];
@@ -455,6 +472,8 @@ export function apply(ctx) {
     callManagementRpc(ctx.connection, WHATSAPP_RPC_CHANNEL, endpoint, payload, signal);
   const imessageRpcCall = (endpoint, payload, signal) =>
     callManagementRpc(ctx.connection, IMESSAGE_RPC_CHANNEL, endpoint, payload, signal);
+  const emailRpcCall = (endpoint, payload, signal) =>
+    callManagementRpc(ctx.connection, EMAIL_RPC_CHANNEL, endpoint, payload, signal);
   const slackRpcCall = (endpoint, payload, signal) =>
     callManagementRpc(ctx.connection, SLACK_RPC_CHANNEL, endpoint, payload, signal);
   const officeRpcCall = (endpoint, payload, signal) =>
