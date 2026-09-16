@@ -3,7 +3,8 @@ import { t } from '../../../../src/channels/shared/i18n.mjs';
 const CHANNEL_NAMES = {
   weixin: '微信', feishu: '飞书', dingtalk: '钉钉', wecom: '企业微信',
   'wecom-app': '企业微信应用', qq: 'QQ', slack: 'Slack', telegram: 'Telegram',
-  discord: 'Discord', whatsapp: 'WhatsApp', office: 'AI Office',
+  discord: 'Discord', whatsapp: 'WhatsApp', imessage: 'iMessage',
+  email: '邮箱', office: 'AI Office',
 };
 const INVALID_CONFIG_MESSAGES = new Set([
   'dsh-weixin config contains invalid account data',
@@ -11,7 +12,7 @@ const INVALID_CONFIG_MESSAGES = new Set([
   'dsh-feishu config contains duplicate bot identities',
   'dsh-feishu config is incomplete or invalid',
   'dsh-dingtalk config contains invalid bot data',
-  ...['Enterprise WeChat', 'Enterprise WeChat app', 'QQ', 'Slack', 'Telegram', 'Discord']
+  ...['Enterprise WeChat', 'Enterprise WeChat app', 'QQ', 'Slack', 'Telegram', 'Discord', 'Email']
     .map(channel => `dsh-im ${channel} config contains invalid bot data`),
   'dsh-im WhatsApp config contains invalid account data',
   'dsh-im AI Office config is invalid',

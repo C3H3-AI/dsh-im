@@ -76,11 +76,9 @@ export class EmailController {
     return this.status();
   }
 
-  /**
-   * Connect one mailbox. The password is verified against IMAP/SMTP before it
+  /** Connect one mailbox. The password is verified against IMAP/SMTP before it
    * is persisted, so a bad app password fails here rather than silently
-   * producing a bot that never receives mail.
-   */
+   * producing a bot that never receives mail. */
   async bindMailbox({ address, password, provider, imapHost, imapPort, smtpHost, smtpPort, allowedSenders } = {}) {
     if (this.#closed) throw new Error(`${EMAIL_DESCRIPTOR.label} controller is closed`);
     const normalizedAddress = normalizeEmailAddress(address);
@@ -247,6 +245,15 @@ export class EmailController {
     return { revision: this.#revision, bots };
   }
 
+  /**
+   * The shared token-bot RPC handler addresses mailbox binding through the
+   * generic `bindCredentials` endpoint, so the mailbox-specific method is
+   * exposed under that name as well.
+   */
+  bindCredentials(payload) {
+    return this.bindMailbox(payload);
+  }
+
   async close() {
     if (this.#closed) return;
     this.#closed = true;
@@ -277,7 +284,7 @@ export class EmailController {
   async #startRuntime(config, credential) {
     // Production owns state/workspace resolution; the controller only passes
     // the identity and the mailbox secret through.
-    const runtime = await this.#createRuntime({ botId: config.botId, config, credential });
+    const runtime = await this.#createRuntime({ botId: config.botId, config, token: credential.password });
     if (!runtime || typeof runtime.start !== 'function' || typeof runtime.stop !== 'function') {
       throw new TypeError('createRuntime returned an invalid Email runtime');
     }

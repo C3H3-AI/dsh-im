@@ -156,7 +156,7 @@ export function createEmailRuntimeStatus() {
 
 export class EmailRuntime {
   #config;
-  #password;
+  #token;
   #harness;
   #state;
   #contextEnhancement;
@@ -174,15 +174,15 @@ export class EmailRuntime {
   #stopped = true;
 
   constructor({
-    config, password, harness, state, contextEnhancement, accessPolicy, logger = console,
+    config, token, harness, state, contextEnhancement, accessPolicy, logger = console,
     replyTimeoutMs = 600_000, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     createApi = (options) => new EmailApi(options),
   }) {
-    if (!config || !password || !harness || !state) {
-      throw new TypeError('EmailRuntime requires config, password, Harness, and state');
+    if (!config || !token || !harness || !state) {
+      throw new TypeError('EmailRuntime requires config, token, Harness, and state');
     }
     this.#config = config;
-    this.#password = password;
+    this.#token = token;
     this.#harness = harness;
     this.#state = state;
     this.#contextEnhancement = contextEnhancement;
@@ -244,7 +244,7 @@ export class EmailRuntime {
       const api = this.#createApi({
         config: {
           address: this.#config.platformId,
-          password: this.#password,
+          password: this.#token,
           imapHost: this.#config.imapHost,
           imapPort: this.#config.imapPort,
           smtpHost: this.#config.smtpHost,
