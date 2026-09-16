@@ -45,6 +45,26 @@ export function stripQuotedHistory(text) {
     .trim();
 }
 
+/**
+ * Derive the transport security mode from the port, which is how mail clients
+ * decide in practice: 465 is implicit TLS, 587 and 25 negotiate STARTTLS, and
+ * anything else is left to the explicit `secure` flag. Treating 587 as
+ * implicit TLS is the classic misconfiguration that makes SMTP hang.
+ */
+export function smtpSecurity(port, secure) {
+  if (secure === true) return { secure: true };
+  if (secure === false) return { secure: false, requireTLS: true };
+  if (port === 465) return { secure: true };
+  if (port === 587 || port === 25 || port === 2525) return { secure: false, requireTLS: true };
+  return { secure: false };
+}
+
+/** IMAP uses implicit TLS on 993 and STARTTLS otherwise. */
+export function imapSecurity(port, secure) {
+  if (secure !== undefined) return { secure: secure !== false };
+  return { secure: port === 993 };
+}
+
 /** Collect every message id from a header value (References / In-Reply-To). */
 export function parseMessageIds(value) {
   if (!value) return [];
@@ -97,7 +117,7 @@ export class EmailApi {
     const client = new ImapFlow({
       host: this.#config.imapHost,
       port: this.#config.imapPort,
-      secure: this.#config.imapSecure !== false,
+      ...imapSecurity(this.#config.imapPort, this.#config.imapSecure),
       auth: { user: this.#config.address, pass: this.#config.password },
       logger: false,
       ...(this.#config.rejectUnauthorized === false ? { tls: { rejectUnauthorized: false } } : {}),
@@ -175,7 +195,7 @@ export class EmailApi {
     this.#transport = nodemailer.createTransport({
       host: this.#config.smtpHost,
       port: this.#config.smtpPort,
-      secure: this.#config.smtpSecure !== false,
+      ...smtpSecurity(this.#config.smtpPort, this.#config.smtpSecure),
       auth: { user: this.#config.address, pass: this.#config.password },
       ...(this.#config.rejectUnauthorized === false ? { tls: { rejectUnauthorized: false } } : {}),
     });
