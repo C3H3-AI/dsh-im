@@ -1750,3 +1750,45 @@ test('the Email connector submits the chosen transport', async () => {
   assert.ok(!('password' in submitted[0]), 'no password is sent for the Agent mailbox');
   renderer.unmount();
 });
+test('the connector form requires authorization before binding an Agent mailbox', async () => {
+  const { EMAIL_SETTINGS_DEFINITION } = await import(
+    '../plugin-src/client/channels/email/index.js'
+  );
+  const textOf = (node) => {
+    if (typeof node === 'string') return node;
+    if (Array.isArray(node)) return node.map(textOf).join('');
+    if (node?.children) return textOf(node.children);
+    return '';
+  };
+  let renderer;
+  await TestRenderer.act(async () => {
+    renderer = TestRenderer.create(React.createElement(
+      EMAIL_SETTINGS_DEFINITION.CredentialPanel,
+      {
+        busy: false, error: null, onSubmit() {}, onCancel() {},
+        rpcCall: async () => ({ ok: true, value: {} }), endpoints: {},
+      },
+    ));
+  });
+  const buttons = () => renderer.root.findAll((node) => node.type === 'button')
+    .map((b) => textOf(b.children));
+  const submit = () => renderer.root.findAll((node) => node.type === 'button')
+    .find((b) => textOf(b.children) === '连接邮箱');
+
+  // Agent mode offers the authorization step instead of a password.
+  const transportSelect = renderer.root.findAll((node) => node.type === 'select')
+    .find((select) => [...select.props.children]
+      .some((option) => option.props.value === 'agent-mail'));
+  await TestRenderer.act(async () => {
+    transportSelect.props.onChange({ target: { value: 'agent-mail' } });
+  });
+  assert.ok(buttons().includes('生成授权链接'), 'the authorization step must be offered');
+  const address = renderer.root.findAll((node) => node.type === 'input')
+    .find((input) => input.props.type === 'email');
+  await TestRenderer.act(async () => {
+    address.props.onChange({ target: { value: 'bot@agent.qq.com' } });
+  });
+  assert.equal(submit().props.disabled, true,
+    'the mailbox cannot be bound before the authorization completes');
+  renderer.unmount();
+});

@@ -440,6 +440,11 @@ export function createTokenChannelSettings(definition) {
                   error: credentialError,
                   onSubmit: bindCredentials,
                   onCancel: () => { setCredentialOpen(false); setCredentialError(null); },
+                  // A transport that authorizes out of band (the Agent mailbox
+                  // shows a QR code) drives its own endpoints through the bridge.
+                  rpcCall,
+                  endpoints,
+                  onAuthorized: bindCredentials,
                 })
               : h(CredentialBindingPanel, {
                   channel,

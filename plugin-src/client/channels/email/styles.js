@@ -32,6 +32,11 @@ const CSS = String.raw`
 .dim-emailBindingRow select { width: 100%; }
 /* Selects clip their own text; a minimum width keeps the chosen title legible. */
 .dim-emailBinding select { min-width: 0; }
+/* QR authorization block for the Agent mailbox. */
+.dim-emailAuth { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--dsw-alias-border, #dee0e3); border-radius: 8px; }
+.dim-emailAuthPanel { display: grid; gap: 6px; }
+.dim-emailAuthRow { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; align-items: center; font-size: 13px; }
+.dim-emailAuthLink { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The full title of the current choice, wrapping instead of clipping. */
 .dim-emailBindingSelected { display: block; white-space: normal; overflow-wrap: anywhere; }
 `;

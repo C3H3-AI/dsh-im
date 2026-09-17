@@ -55,12 +55,105 @@ function field(label, control, hint) {
 }
 
 /**
+ * QR authorization for the Agent mailbox.
+ *
+ * There is no one-shot scan payload: the authorization page embeds its own
+ * WeChat QR, so the user opens this URL (or scans it) and signs in there. The
+ * page is polled until the server reports the authorization.
+ */
+function AgentMailAuth({ rpcCall, endpoints, disabled, onAuthorized, onError }) {
+  const [session, setSession] = React.useState(null);
+  const [status, setStatus] = React.useState('idle');
+  const [error, setError] = React.useState(null);
+
+  const invoke = React.useCallback(async (endpoint, payload) => {
+    const response = await rpcCall(endpoint, payload);
+    if (response && typeof response === 'object' && 'ok' in response) {
+      if (response.ok === false) throw new Error(response.error?.message ?? '请求失败');
+      return response.value;
+    }
+    return response;
+  }, [rpcCall]);
+
+  const begin = async () => {
+    setError(null);
+    setStatus('starting');
+    try {
+      const started = await invoke(endpoints.startAuth, { transport: 'agent-mail' });
+      setSession(started);
+      setStatus('waiting');
+    } catch (startError) {
+      setStatus('idle');
+      setError(startError);
+      onError?.(startError);
+    }
+  };
+
+  // Poll while waiting; the authorization happens in another tab or app.
+  React.useEffect(() => {
+    if (status !== 'waiting' || !session) return undefined;
+    let cancelled = false;
+    const timer = setInterval(async () => {
+      try {
+        const result = await invoke(endpoints.pollAuth, {});
+        if (cancelled) return;
+        if (result?.authorized) {
+          setStatus('authorized');
+          onAuthorized?.({
+            transport: 'agent-mail',
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
+          });
+        }
+      } catch (pollError) {
+        if (cancelled) return;
+        setStatus('idle');
+        setError(pollError);
+      }
+    }, 3000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [endpoints, invoke, onAuthorized, session, status]);
+
+  if (status === 'authorized') {
+    return h('p', { className: 'dim-emailHint', role: 'status' }, '授权成功，正在接入邮箱…');
+  }
+
+  return h('div', { className: 'dim-emailAuth' },
+    h('p', { className: 'dim-emailHint' },
+      '腾讯 Agent 邮箱需要微信扫码授权。点下面的按钮生成授权链接，在打开的页面里用微信扫码登录并确认。'),
+    session
+      ? h('div', { className: 'dim-emailAuthPanel' },
+        h('div', { className: 'dim-emailAuthRow' },
+          h('span', null, '授权链接'),
+          h('a', {
+            href: session.browserUrl, target: '_blank', rel: 'noreferrer',
+            className: 'dim-emailAuthLink',
+          }, session.browserUrl)),
+        session.inputCode
+          ? h('div', { className: 'dim-emailAuthRow' },
+            h('span', null, '配对码'),
+            h('code', null, session.inputCode))
+          : null,
+        h('p', { className: 'dim-emailHint' },
+          status === 'waiting' ? '等待授权中…（最多 5 分钟，可在此页保持打开）' : null))
+      : null,
+    error ? h('p', { className: 'dim-inlineError', role: 'alert' }, error.message ?? String(error)) : null,
+    h('div', { className: 'ddt-actions dim-viewActions' },
+      h('button', {
+        type: 'button', className: 'ddt-button', disabled: disabled || status === 'starting',
+        onClick: () => { void begin(); },
+      }, !session ? '生成授权链接' : '重新生成')));
+}
+
+/**
  * Mailbox credential form: address + app password + provider (or explicit
  * hosts) + the sender allowlist, which is required because a mail address is
  * forgeable and an open mailbox would let anyone drive the Harness.
  */
-function MailboxPanel({ busy, error, onSubmit, onCancel }) {
+function MailboxPanel({ busy, error, onSubmit, onCancel, rpcCall, endpoints }) {
   const [transportKey, setTransportKey] = React.useState('imap-smtp');
+  // Held only in memory: the panel hands the pair straight to the bind call.
+  const [tokens, setTokens] = React.useState(null);
   const [provider, setProvider] = React.useState('qq');
   const [address, setAddress] = React.useState('');
   const [password, setPassword] = React.useState('');
@@ -72,12 +165,16 @@ function MailboxPanel({ busy, error, onSubmit, onCancel }) {
   const transport = TRANSPORTS.find((entry) => entry.key === transportKey) ?? TRANSPORTS[0];
   const custom = transport.needsProvider && provider === 'custom';
   // The Agent mailbox authorizes by QR code, so it has no password to collect.
-  const maySubmit = Boolean(address.trim()) && (!transport.needsPassword || Boolean(password));
+  const isAgentMail = transport.key === 'agent-mail';
+  const maySubmit = Boolean(address.trim())
+    && (!transport.needsPassword || Boolean(password))
+    && (!isAgentMail || Boolean(tokens));
 
   const submit = () => onSubmit({
     address: address.trim(),
     transport: transport.key,
     ...(transport.needsPassword ? { password } : {}),
+    ...(isAgentMail && tokens ? { ...tokens } : {}),
     ...(transport.needsProvider ? { provider } : {}),
     allowedSenders: allowedSenders
       .split(/[\s,;，；]+/)
@@ -131,6 +228,15 @@ function MailboxPanel({ busy, error, onSubmit, onCancel }) {
           value: smtpPort, placeholder: '465', disabled: busy,
           onChange: (event) => setSmtpPort(event.target.value),
         }))) : null,
+      isAgentMail
+        ? h(AgentMailAuth, {
+          rpcCall,
+          endpoints,
+          disabled: busy,
+          onAuthorized: (granted) => setTokens(granted),
+          onError: () => setTokens(null),
+        })
+        : null,
       field('允许的发件人', h('textarea', {
         value: allowedSenders, disabled: busy,
         placeholder: 'me@example.com\n同事@example.com',

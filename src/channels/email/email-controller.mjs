@@ -5,7 +5,11 @@ import {
 } from '../shared/access-policy.mjs';
 import { assertTransport } from './transport.mjs';
 import { ImapSmtpTransport } from './transports/imap-smtp.mjs';
-import { AgentMailTransport } from './transports/agent-mail.mjs';
+import {
+  AgentMailTransport,
+  pollAgentMailDeviceFlow,
+  startAgentMailDeviceFlow,
+} from './transports/agent-mail.mjs';
 import {
   DEFAULT_EMAIL_TRANSPORT,
   EMAIL_TRANSPORTS,
@@ -21,6 +25,9 @@ import {
 } from './config-store.mjs';
 import { EmailStateStore } from './state-store.mjs';
 import { EMAIL_DESCRIPTOR } from './email-bridge.mjs';
+
+/** How long a QR authorization stays valid before it must be restarted. */
+const AGENT_MAIL_AUTH_TTL_MS = 300_000;
 
 /**
  * Credential payload for one mailbox.
@@ -53,6 +60,7 @@ export class EmailController {
   #configStore;
   #createRuntime;
   #transports;
+  #pendingAuth = null;
   #syncAccessPolicy;
   #stateFor;
   #listWorkspaceSessions;
@@ -546,6 +554,52 @@ export class EmailController {
   }
 
   /** Roll a credential ref back to its previous plain value, or clear it. */
+  /**
+   * Begin an out-of-band authorization for a transport that needs one (the
+   * Agent mailbox authorizes by WeChat QR code rather than a password). The
+   * pending device code is held until the matching poll completes it.
+   */
+  async startAuthorization({ transport, hostname } = {}) {
+    const key = normalizeEmailTransport(transport ?? DEFAULT_EMAIL_TRANSPORT);
+    if (key !== 'agent-mail') {
+      throw new TypeError(t('该接入方式不需要扫码授权'));
+    }
+    const device = await startAgentMailDeviceFlow({ hostname });
+    this.#pendingAuth = { transport: key, pollUrl: device.pollUrl, startedAt: Date.now() };
+    return {
+      transport: key,
+      // The authorization page embeds its own WeChat QR, so the URL is what the
+      // user opens or scans; there is no one-shot scan payload to render.
+      browserUrl: device.browserUrl,
+      inputCode: device.inputCode,
+      expiresAt: this.#pendingAuth.startedAt + AGENT_MAIL_AUTH_TTL_MS,
+    };
+  }
+
+  /**
+   * Check a pending authorization once. On success the tokens are returned so
+   * the caller can bind the mailbox without ever seeing a password.
+   */
+  async pollAuthorization() {
+    const pending = this.#pendingAuth;
+    if (!pending) throw new TypeError(t('扫码授权尚未开始'));
+    if (Date.now() - pending.startedAt > AGENT_MAIL_AUTH_TTL_MS) {
+      this.#pendingAuth = null;
+      throw new TypeError(t('扫码授权已超时，请重新发起'));
+    }
+    const result = await pollAgentMailDeviceFlow({ pollUrl: pending.pollUrl });
+    if (result.status !== 'authorized' || !result.tokens) {
+      return { status: result.status, authorized: false };
+    }
+    this.#pendingAuth = null;
+    return {
+      status: 'authorized',
+      authorized: true,
+      accessToken: result.tokens.accessToken,
+      refreshToken: result.tokens.refreshToken,
+    };
+  }
+
   /**
    * Persist tokens a transport rotated mid-flight. The Agent mailbox hands back
    * a new refresh token on every refresh, so losing the write would break the

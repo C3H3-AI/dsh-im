@@ -7,6 +7,8 @@ export const EMAIL_ENDPOINTS = Object.freeze({
   bindCredentials: 'bot.bind-mailbox',
   updateMailbox: 'bot.mailbox.update',
   // Session binding controls (per-account settings panel).
+  startAuth: 'bot.auth.start',
+  pollAuth: 'bot.auth.poll',
   getBinding: 'bot.session-binding.get',
   setBinding: 'bot.session-binding.set',
   listSessions: 'bot.session.list',

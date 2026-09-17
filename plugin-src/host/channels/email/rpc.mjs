@@ -17,6 +17,9 @@ export const EMAIL_ENDPOINTS = Object.freeze({
   setAlias: 'bot.alias.set',
   // Session binding: read the current bindings, change them, and list the
   // candidate sessions for the picker.
+  // QR device flow for transports that authorize out of band (Agent mailbox).
+  startAuth: 'bot.auth.start',
+  pollAuth: 'bot.auth.poll',
   getBinding: 'bot.session-binding.get',
   setBinding: 'bot.session-binding.set',
   listSessions: 'bot.session.list',
@@ -60,6 +63,20 @@ export function createEmailRpcHandler(controller) {
             details: error?.details ?? {},
           },
         });
+      }
+    }
+    if (endpoint === EMAIL_ENDPOINTS.startAuth) {
+      try {
+        return { ok: true, value: await controller.startAuthorization(payload ?? {}) };
+      } catch (error) {
+        return failure('email-auth-failed', error);
+      }
+    }
+    if (endpoint === EMAIL_ENDPOINTS.pollAuth) {
+      try {
+        return { ok: true, value: await controller.pollAuthorization(payload ?? {}) };
+      } catch (error) {
+        return failure('email-auth-failed', error);
       }
     }
     if (endpoint === EMAIL_ENDPOINTS.getBinding) {

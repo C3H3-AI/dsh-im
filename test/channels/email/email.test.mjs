@@ -809,3 +809,68 @@ test('the device flow exposes a URL to scan and reports authorization', async ()
   });
   assert.deepEqual(done.tokens, { accessToken: 'tok', refreshToken: 'ref' });
 });
+
+test('the Agent mailbox authorization returns a URL to open and yields tokens', async () => {
+  // There is no one-shot scan payload: the authorization page embeds its own
+  // WeChat QR, so the flow hands back a URL and polls until the server agrees.
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-auth-'));
+  const originalFetch = globalThis.fetch;
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    let polls = 0;
+    globalThis.fetch = async (url) => {
+      const reply = (data) => ({
+        ok: true, status: 200, text: async () => JSON.stringify(data), json: async () => data,
+      });
+      if (String(url).includes('/oauth/device')) {
+        return reply({
+          poll_url: 'https://auth.agent.qq.com/poll/x',
+          browser_url: 'https://agent.qq.com/authorize?code=1',
+          input_code: 'XY12',
+        });
+      }
+      polls += 1;
+      return reply(polls < 2
+        ? { status: 'pending' }
+        : { status: 'authorized', access_token: 'AT', refresh_token: 'RT' });
+    };
+
+    const controller = new EmailController({
+      credentials: {
+        async resolve() { return null; }, async set() {}, async unset() {},
+      },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+    });
+
+    const started = await controller.startAuthorization({ transport: 'agent-mail' });
+    assert.equal(started.browserUrl, 'https://agent.qq.com/authorize?code=1');
+    assert.equal(started.inputCode, 'XY12');
+    assert.equal(started.transport, 'agent-mail');
+
+    assert.deepEqual(await controller.pollAuthorization(), {
+      status: 'pending', authorized: false,
+    });
+    const done = await controller.pollAuthorization();
+    assert.equal(done.authorized, true);
+    assert.equal(done.accessToken, 'AT');
+    assert.equal(done.refreshToken, 'RT');
+
+    // A completed authorization is consumed, not polled again.
+    await assert.rejects(() => controller.pollAuthorization(), /尚未开始/);
+
+    // Only a transport that authorizes out of band offers this.
+    await assert.rejects(
+      () => controller.startAuthorization({ transport: 'imap-smtp' }),
+      /不需要扫码授权/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+
