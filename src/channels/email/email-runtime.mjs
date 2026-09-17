@@ -29,6 +29,21 @@ function isAutomatedSender(address) {
   return IGNORED_SENDER_PATTERNS.some((pattern) => pattern.test(local));
 }
 
+/**
+ * True when a message declares itself an automatic reply (RFC 3834). Any value
+ * other than "no" counts, matching the standard: "auto-replied",
+ * "auto-generated", "auto-notified".
+ */
+export function isAutoSubmitted(parsed) {
+  const raw = parsed?.headers?.get?.('auto-submitted')
+    ?? (Array.isArray(parsed?.headerLines)
+      ? parsed.headerLines.find((line) => /^auto-submitted:/i.test(line?.line ?? ''))?.line
+        ?.slice('auto-submitted:'.length)
+      : undefined);
+  const value = String(raw ?? '').trim().toLowerCase();
+  return value !== '' && value !== 'no';
+}
+
 /** Reply subject: keep one "Re:" prefix so threads stay grouped. */
 export function replySubject(subject) {
   const text = String(subject ?? '').trim();
@@ -88,8 +103,10 @@ export function normalizeEmail(parsed, { address, state } = {}) {
   if (!messageId) return null;
   const from = normalizeAddress(parsed?.from?.value?.[0]?.address ?? parsed?.from?.text);
   if (!from) return null;
-  // Never answer our own mail: it would loop forever.
-  if (address && from === normalizeAddress(address)) return null;
+  // Loop break, per RFC 3834: anything marked as an automatic reply is never
+  // answered, so this mailbox can safely be its own sender (writing to itself
+  // to drive the Harness) without two bots echoing each other forever.
+  if (isAutoSubmitted(parsed)) return null;
   if (isAutomatedSender(from)) return null;
 
   const references = parseMessageIds(parsed?.references);

@@ -210,6 +210,11 @@ export class EmailApi {
       to,
       subject: subject || '(no subject)',
       text: body,
+      // RFC 3834: mark this as an automatic reply so any bot on the other side
+      // (including this mailbox replying to itself) can refuse to auto-answer
+      // it. That is the standard loop break, and it lets a mailbox accept its
+      // own address as a sender without risking an endless exchange.
+      headers: { 'Auto-Submitted': 'auto-replied' },
       ...(inReplyTo ? { inReplyTo } : {}),
       ...(references?.length ? { references: references.join(' ') } : {}),
       ...(attachments.length ? { attachments } : {}),

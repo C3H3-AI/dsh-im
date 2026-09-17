@@ -106,12 +106,35 @@ test('normalizeEmail keeps a reply inside the existing conversation', () => {
   assert.equal(reply.conversationId, first.conversationId);
 });
 
-test('normalizeEmail drops self-sent, automated, and empty mail', () => {
+test('a mailbox may be its own sender, but never answers an automatic reply', () => {
+  // Honouring RFC 3834 instead of rejecting the mailbox's own address lets a
+  // user drive the Harness by writing to the bot mailbox from that same
+  // mailbox, which is a normal way to use it.
   const state = new EmailStateStore(join(tmpdir(), 'unused-email-state-3.json'));
   const selfSent = normalizeEmail(parsedMail({
     from: { value: [{ address: 'DSH@QQ.com' }] },
   }), { address: BOT, state });
-  assert.equal(selfSent, null, 'mail from the mailbox itself must not loop back');
+  assert.ok(selfSent, 'a hand-written mail from the mailbox itself is accepted');
+  assert.equal(selfSent.senderId, 'dsh@qq.com');
+
+  // The loop is broken by the marker every automatic reply carries.
+  for (const marker of [
+    { headers: new Map([['auto-submitted', 'auto-replied']]) },
+    { headerLines: [{ line: 'Auto-Submitted: auto-generated' }] },
+  ]) {
+    assert.equal(
+      normalizeEmail(parsedMail({ from: { value: [{ address: 'other@x.com' }] }, ...marker }),
+        { address: BOT, state }),
+      null,
+      'an automatic reply must never be answered',
+    );
+  }
+  // "no" explicitly means a human message.
+  assert.ok(normalizeEmail(parsedMail({
+    from: { value: [{ address: 'other@x.com' }] },
+    headers: new Map([['auto-submitted', 'no']]),
+  }), { address: BOT, state }));
+
   const automated = normalizeEmail(parsedMail({
     from: { value: [{ address: 'noreply@shop.example' }] },
   }), { address: BOT, state });
@@ -461,4 +484,30 @@ test('the mailbox fields survive the client snapshot normalizer', async () => {
   assert.equal(bot.imapPort, 993);
   assert.equal(bot.smtpPort, 587);
   assert.equal(bot.provider, 'qq');
+});
+
+test('outgoing replies carry the RFC 3834 automatic-reply marker', async () => {
+  // The marker is what lets a remote bot (or this mailbox) refuse to answer an
+  // automatic reply, so it must travel on every message we send.
+  const source = await readFile(
+    new URL('../../../src/channels/email/email-api.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /'Auto-Submitted':\s*'auto-replied'/,
+    'every outgoing mail must be marked as an automatic reply');
+});
+
+test('the mailbox answers its own hand-written mail without looping', async () => {
+  // End-to-end shape of the loop break: a mail the mailbox sends itself is
+  // processed, the reply is marked automatic, and that reply is then ignored.
+  const state = new EmailStateStore(join(tmpdir(), 'unused-email-loop.json'));
+  const own = normalizeEmail(parsedMail({ from: { value: [{ address: BOT }] } }),
+    { address: BOT, state });
+  assert.ok(own, 'the hand-written mail is processed');
+
+  const reply = normalizeEmail(parsedMail({
+    from: { value: [{ address: BOT }] },
+    headers: new Map([['auto-submitted', 'auto-replied']]),
+  }), { address: BOT, state });
+  assert.equal(reply, null, 'our own automatic reply must not be processed again');
 });
