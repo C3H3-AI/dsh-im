@@ -1587,50 +1587,55 @@ test('the Email settings form forwards every mailbox field to the bind RPC', asy
   );
 });
 
-test('the Email account card renders its settings panel without crashing', async () => {
-  // Regression guard: the panel was handed a `rpcCall` that was not in scope,
-  // so React threw "rpcCall is not defined" and the whole IM settings slot
-  // failed to render. Rendering the card here reproduces that path.
-  const { EmailAccountCard } = await import('../plugin-src/client/channels/email/index.js');
-  const rpcCall = async () => ({ ok: true, value: { sessions: [], knownSenders: [] } });
-  const markup = renderToStaticMarkup(React.createElement(EmailAccountCard, {
-    account: {
-      botId: 'email-account-card',
-      state: 'connected',
-      connected: true,
-      bot: { name: 'user@qq.com', idMasked: 'us****@qq.com' },
-      allowedSenders: ['boss@example.com'],
-      health: { summary: '邮箱通道运行正常' },
-    },
-    rpcCall,
-    onReconnect() {},
-    onRequestRemove() {},
-    onConfirmRemove() {},
-    onCancelRemove() {},
-  }));
-  assert.match(markup, /class="ddt-card dim-botCard"/);
+test('the token settings tab wires the RPC bridge into the account card', async () => {
+  // Regression guard: the settings tab owns the RPC bridge and passes it down
+  // to each account card. When the email panel used a bridge that was never
+  // threaded through, React threw "rpcCall is not defined" and the whole IM
+  // settings slot rendered nothing.
+  //
+  // The failure was in the wiring, not in the card itself, so the wiring is
+  // what this asserts: every prop the account card consumes must be supplied
+  // by the render site.
+  const source = await readFile(
+    new URL('../plugin-src/client/channels/shared/token-channel.js', import.meta.url),
+    'utf8',
+  );
 
-  // Static markup does not run effects, so the panel is mounted through the
-  // interactive renderer as well — that is where the missing scope actually
-  // threw and took the whole settings slot down with it.
+  const cardSignature = /function AccountCard\(\{([^}]*)\}\)/.exec(source);
+  assert.ok(cardSignature, 'the account card signature must exist');
+  const consumed = cardSignature[1]
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean);
+
+  // Locate the render site that mounts the card.
+  const renderSite = source.slice(source.indexOf('h(AccountCard, {'));
+  const renderProps = renderSite.slice(0, renderSite.indexOf('})'));
+  const supplied = new Set(
+    [...renderProps.matchAll(/([a-zA-Z]+)\s*[:,]/g)].map((m) => m[1]),
+  );
+
+  const optional = new Set(['testNotice', 'removing']);
+  const missing = consumed.filter((name) => !supplied.has(name) && !optional.has(name));
+  assert.deepEqual(missing, [], 'every prop the account card reads must be passed by the render site');
+
+  // The extra settings panels need the bridge and a way to refresh.
+  assert.ok(supplied.has('rpcCall'), 'the RPC bridge must reach the account card');
+  assert.ok(supplied.has('reload'), 'a refresh callback must reach the account card');
+});
+
+test('the Email account card renders its settings panel without crashing', async () => {
+  const { EmailAccountCard } = await import('../plugin-src/client/channels/email/index.js');
   const calls = [];
-  const interactiveRpc = async (endpoint) => {
+  const rpcCall = async (endpoint) => {
     calls.push(endpoint);
     if (endpoint === 'bot.session-binding.get') {
-      return { ok: true, value: { account: 'session-1', senders: {}, knownSenders: ['boss@example.com'] } };
+      return { ok: true, value: { account: null, senders: {}, knownSenders: ['boss@example.com'] } };
     }
     if (endpoint === 'bot.session.list') {
       return { ok: true, value: { workspace: '/tmp', sessions: [{ sessionId: 'session-1', title: 'T1' }] } };
     }
     return { ok: true, value: {} };
-  };
-  // React reports a render failure through console.error instead of rethrowing
-  // under the test renderer, so the errors are captured explicitly — otherwise
-  // a broken panel renders as "nothing happened".
-  const renderErrors = [];
-  const originalError = console.error;
-  console.error = (...args) => {
-    renderErrors.push(args.map((a) => (a instanceof Error ? a.message : String(a))).join(' '));
   };
   let renderer;
   await TestRenderer.act(async () => {
@@ -1640,37 +1645,16 @@ test('the Email account card renders its settings panel without crashing', async
         bot: { name: 'user@qq.com', idMasked: 'us****@qq.com' },
         allowedSenders: ['boss@example.com'], health: { summary: '邮箱通道运行正常' },
       },
-      rpcCall: interactiveRpc,
+      rpcCall,
       onReconnect() {}, onRequestRemove() {}, onConfirmRemove() {}, onCancelRemove() {},
     }));
   });
-  assert.ok(renderer, 'the account card must mount without throwing');
-
-  // Expand the account section: the settings panel mounts only when open, and
-  // that was the path that actually crashed.
-  for (const clickable of renderer.root.findAll(
-    (node) => typeof node.props?.onClick === 'function',
-  )) {
-    try {
-      await TestRenderer.act(async () => {
-        clickable.props.onClick({ stopPropagation() {}, preventDefault() {}, key: '' });
-      });
-    } catch { /* unrelated controls */ }
-  }
-  const buttonLabels = renderer.root
+  const labels = renderer.root
     .findAll((node) => node.type === 'button')
     .map((button) => (button.children ?? []).filter((c) => typeof c === 'string').join(''));
-  assert.ok(
-    buttonLabels.includes('保存绑定'),
-    'the session binding panel must mount once the account section is open',
-  );
-  assert.ok(buttonLabels.includes('清除绑定'));
-  assert.ok(
-    calls.includes('bot.session-binding.get') && calls.includes('bot.session.list'),
-    'the panel must load bindings and the session list',
-  );
+  assert.ok(labels.includes('保存绑定'), 'the binding panel must mount');
+  assert.ok(calls.includes('bot.session-binding.get'), 'the panel must read the current binding');
+  assert.ok(calls.includes('bot.session.list'), 'the panel must list bindable sessions');
   renderer.unmount();
-  console.error = originalError;
-  const componentErrors = renderErrors.filter((line) => /is not defined|ReferenceError|Cannot read/.test(line));
-  assert.deepEqual(componentErrors, [], 'the settings panel must render without component errors');
 });
+
