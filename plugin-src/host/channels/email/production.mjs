@@ -45,5 +45,8 @@ export function createProductionController(ctx, config = {}, internals = {}) {
         ? {} : { pollIntervalMs: channelConfig.pollIntervalMs }),
     }),
     initialAccessPolicyForBot: emailAccessPolicyFor,
+    // Declares that this channel keeps its allowlist in its own config and
+    // pushes the derived policy into the workspace store on change.
+    accessPolicyForBot: emailAccessPolicyFor,
   });
 }

@@ -118,6 +118,16 @@ export async function createTokenProductionController(ctx, config, internals, de
     configStore: observedConfigStore,
     logger,
     ...(internals.inspectToken ? { inspectToken: internals.inspectToken } : {}),
+    // Optional per-channel hook: a channel whose own settings also express an
+    // access rule (email's sender allowlist) can push the derived policy into
+    // the workspace store, which is what the runtime actually reads.
+    ...(typeof definitions.accessPolicyForBot === 'function' ? {
+      syncAccessPolicy: async (botId, policy) => {
+        await workspaces.setAccessPolicy(botId, policy, {
+          incarnation: workspaces.incarnationFor(botId),
+        });
+      },
+    } : {}),
     createRuntime: async ({ botId, config: botConfig, token }) => {
       const state = await stateFor(botId);
       await workspaces.ensure(botId, {

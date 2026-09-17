@@ -16,4 +16,5 @@ export default Object.freeze({
   '邮箱通道连接正常。': 'The Email channel is connected.',
   '邮箱通道运行正常': 'The Email channel is running normally',
   '邮箱通道尚未连接': 'The Email channel is not connected yet',
+  '邮箱访问策略同步失败，请重试': 'Failed to sync the mailbox access policy; please retry',
 });

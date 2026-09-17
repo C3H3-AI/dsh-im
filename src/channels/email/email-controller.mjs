@@ -1,4 +1,8 @@
 import { t } from '../shared/i18n.mjs';
+import {
+  createAccessPolicy,
+  createAccessPolicyScope,
+} from '../shared/access-policy.mjs';
 import { EmailApi } from './email-api.mjs';
 import {
   EMAIL_PROVIDERS,
@@ -25,6 +29,7 @@ export class EmailController {
   #configStore;
   #createRuntime;
   #createApi;
+  #syncAccessPolicy;
   #deleteState;
   #logger;
   #runtimes = new Map();
@@ -40,6 +45,10 @@ export class EmailController {
     deleteState = async () => {},
     logger = console,
     createApi = (options) => new EmailApi(options),
+    // Host-owned hook: the mailbox allowlist and the Harness access policy are
+    // two separate stores, so a changed allowlist must be pushed into the
+    // policy or the channel keeps rejecting the new senders.
+    syncAccessPolicy = null,
   }) {
     if (!credentials || typeof credentials.resolve !== 'function'
       || typeof credentials.set !== 'function' || typeof credentials.unset !== 'function') {
@@ -54,6 +63,7 @@ export class EmailController {
     this.#configStore = configStore;
     this.#createRuntime = createRuntime;
     this.#createApi = createApi;
+    this.#syncAccessPolicy = typeof syncAccessPolicy === 'function' ? syncAccessPolicy : null;
     this.#deleteState = deleteState;
     this.#logger = logger;
   }
@@ -161,7 +171,9 @@ export class EmailController {
         next.allowedSenders = normalizeEmailAccessPolicy({ allowedSenders: update.allowedSenders }).allowedSenders;
       }
       if (next.allowedSenders.length === 0) throw new TypeError(t('必须至少配置一个允许发件人'));
+      const allowlistChanged = update.allowedSenders !== undefined;
       const saved = await this.#configStore.save(next);
+      if (allowlistChanged) await this.#applyAllowlistToPolicy(botId, saved);
       // Host and allowlist changes take effect immediately.
       await this.#stopRuntime(botId);
       const secrets = await this.#resolveSecrets(saved);
@@ -288,6 +300,33 @@ export class EmailController {
   }
 
   // ── internals ────────────────────────────────────────────────────────────
+
+  /**
+   * Build the Harness access policy for a mailbox: both scopes are allowlists
+   * seeded from the configured senders, so mail from anyone else is refused.
+   */
+  #accessPolicyFor(config) {
+    const senders = Array.isArray(config?.allowedSenders) ? config.allowedSenders : [];
+    const scope = createAccessPolicyScope({
+      mode: 'allowlist',
+      open: { defaultCanExecuteCommands: false, commandPermissionOverrides: [] },
+      allowlist: { users: senders.map((id) => ({ id, canExecuteCommands: true })) },
+    });
+    return createAccessPolicy({ direct: scope, group: scope });
+  }
+
+  /** Push the mailbox allowlist into the Harness access policy. */
+  async #applyAllowlistToPolicy(botId, config) {
+    if (!this.#syncAccessPolicy) return;
+    try {
+      await this.#syncAccessPolicy(botId, this.#accessPolicyFor(config));
+    } catch (error) {
+      // The mailbox itself is already saved and connected; a policy push
+      // failure must not undo that, but it is surfaced for diagnosis.
+      this.#logger.warn?.('[dsh-im:email] failed to sync the access policy:', error);
+      throw new Error(t('邮箱访问策略同步失败，请重试'));
+    }
+  }
 
   #requireConfig(botId) {
     const config = this.#configStore.get(botId);

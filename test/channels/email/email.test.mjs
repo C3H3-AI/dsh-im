@@ -301,3 +301,42 @@ test('polling only downloads mail from allowlisted senders', async () => {
   // Every body fetch sits in the second pass, after the envelope loop closes.
   assert.match(list, /for \(const uid of accepted\)/, 'bodies are fetched from the accepted list only');
 });
+
+test('changing the mailbox allowlist pushes the matching access policy', async () => {
+  // The mailbox allowlist and the Harness access policy are separate stores.
+  // Updating only the allowlist left the policy holding the old senders, so
+  // the channel kept rejecting every new sender even though it was listed.
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-policy-'));
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    await store.save({
+      platformId: 'bot@qq.com', name: 'bot@qq.com', provider: 'qq',
+      allowedSenders: ['old@example.com'],
+    });
+    const [bot] = store.list();
+    const synced = [];
+    const controller = new EmailController({
+      credentials: {
+        async resolve() { return { value: JSON.stringify({ address: 'bot@qq.com', password: 'p' }) }; },
+        async set() {}, async unset() {},
+      },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+      syncAccessPolicy: async (botId, policy) => { synced.push({ botId, policy }); },
+    });
+    await controller.updateMailboxSettings(bot.botId, {
+      allowedSenders: ['new@example.com', 'other@example.com'],
+    });
+    assert.equal(synced.length, 1, 'the access policy must be synced when the allowlist changes');
+    assert.deepEqual(
+      synced[0].policy.direct.allowlist.users.map((u) => u.id),
+      ['new@example.com', 'other@example.com'],
+    );
+    assert.equal(synced[0].policy.direct.mode, 'allowlist');
+    assert.equal(synced[0].policy.group.mode, 'allowlist');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
