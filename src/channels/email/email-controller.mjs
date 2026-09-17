@@ -22,13 +22,30 @@ import {
 import { EmailStateStore } from './state-store.mjs';
 import { EMAIL_DESCRIPTOR } from './email-bridge.mjs';
 
-/** Credential payload for one mailbox: the login plus its app password. */
+/**
+ * Credential payload for one mailbox.
+ *
+ * The whole payload lives under one credential ref as JSON — the channel's
+ * established shape, unlike the single-secret channels — because a mailbox
+ * needs its address alongside its secret.
+ *
+ * A standard mailbox carries an app password; the Agent mailbox carries an
+ * OAuth pair instead, since it has no password at all.
+ */
 function normalizeCredential(value) {
   if (!value || typeof value !== 'object') return null;
   const address = typeof value.address === 'string' ? value.address.trim().toLowerCase() : '';
+  if (!address) return null;
   const password = typeof value.password === 'string' ? value.password : '';
-  if (!address || !password) return null;
-  return { address, password };
+  const accessToken = typeof value.accessToken === 'string' ? value.accessToken : '';
+  const refreshToken = typeof value.refreshToken === 'string' ? value.refreshToken : '';
+  if (!password && !accessToken) return null;
+  return {
+    address,
+    ...(password ? { password } : {}),
+    ...(accessToken ? { accessToken } : {}),
+    ...(refreshToken ? { refreshToken } : {}),
+  };
 }
 
 export class EmailController {
@@ -498,7 +515,15 @@ export class EmailController {
   async #startRuntime(config, credential) {
     // Production owns state/workspace resolution; the controller only passes
     // the identity and the mailbox secret through.
-    const runtime = await this.#createRuntime({ botId: config.botId, config, token: credential.password });
+    const runtime = await this.#createRuntime({
+      botId: config.botId,
+      config,
+      // `token` stays for the shared runtime shape; the full credential is what
+      // a transport actually needs, since a mailbox may carry tokens instead of
+      // a password.
+      token: credential.password ?? credential.accessToken,
+      credential,
+    });
     if (!runtime || typeof runtime.start !== 'function' || typeof runtime.stop !== 'function') {
       throw new TypeError('createRuntime returned an invalid Email runtime');
     }
@@ -521,6 +546,28 @@ export class EmailController {
   }
 
   /** Roll a credential ref back to its previous plain value, or clear it. */
+  /**
+   * Persist tokens a transport rotated mid-flight. The Agent mailbox hands back
+   * a new refresh token on every refresh, so losing the write would break the
+   * next refresh and eventually sign the mailbox out.
+   */
+  async persistTokens(botId, tokens = {}) {
+    const config = this.#configStore.list().find((entry) => entry.botId === botId);
+    if (!config) return false;
+    const accessToken = typeof tokens.accessToken === 'string' ? tokens.accessToken : '';
+    if (!accessToken) return false;
+    const current = (await this.#resolveSecrets(config)) ?? {};
+    const next = {
+      ...current,
+      accessToken,
+      ...(typeof tokens.refreshToken === 'string' && tokens.refreshToken
+        ? { refreshToken: tokens.refreshToken } : {}),
+    };
+    await this.#credentials.set(config.tokenRef, JSON.stringify(next));
+    this.#touch();
+    return true;
+  }
+
   async #restoreCredential(tokenRef, previous) {
     if (typeof previous !== 'string' || !previous) {
       await this.#credentials.unset(tokenRef).catch(() => {});

@@ -50,5 +50,9 @@ export function createProductionController(ctx, config = {}, internals = {}) {
     accessPolicyForBot: emailAccessPolicyFor,
     // The mailbox settings page can pin the chat to an existing session.
     supportsSessionBinding: true,
+    // The Agent mailbox rotates its refresh token on every refresh, so the new
+    // pair must be written back through the controller.
+    persistBotCredential: ({ botId, tokens, controller }) =>
+      controller?.persistTokens?.(botId, tokens) ?? Promise.resolve(false),
   });
 }

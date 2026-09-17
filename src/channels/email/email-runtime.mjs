@@ -253,6 +253,8 @@ export class EmailRuntime {
   #replyTimeoutMs;
   #pollIntervalMs;
   #createApi;
+  #credential = null;
+  #onTokensRefreshed;
   #status = createEmailRuntimeStatus();
   #api;
   #bridge;
@@ -265,6 +267,7 @@ export class EmailRuntime {
     config, token, harness, state, contextEnhancement, accessPolicy, logger = console,
     replyTimeoutMs = 600_000, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     createApi = (options) => new EmailApi(options),
+    credential = null, onTokensRefreshed = null,
   }) {
     if (!config || !token || !harness || !state) {
       throw new TypeError('EmailRuntime requires config, token, Harness, and state');
@@ -279,6 +282,8 @@ export class EmailRuntime {
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#pollIntervalMs = pollIntervalMs;
     this.#createApi = createApi;
+    this.#credential = credential ?? null;
+    this.#onTokensRefreshed = typeof onTokensRefreshed === 'function' ? onTokensRefreshed : null;
   }
 
   get status() {
@@ -332,7 +337,11 @@ export class EmailRuntime {
       const api = this.#createApi({
         config: {
           address: this.#config.platformId,
+          // A standard mailbox authenticates with the app password; the Agent
+          // mailbox has none and carries an OAuth pair instead.
           password: this.#token,
+          ...(this.#credential?.accessToken ? { accessToken: this.#credential.accessToken } : {}),
+          ...(this.#credential?.refreshToken ? { refreshToken: this.#credential.refreshToken } : {}),
           imapHost: this.#config.imapHost,
           imapPort: this.#config.imapPort,
           smtpHost: this.#config.smtpHost,
@@ -340,6 +349,9 @@ export class EmailRuntime {
           mailbox: this.#config.mailbox ?? EMAIL_CLIENT_DEFAULTS.mailbox,
         },
         signal: this.#abortController.signal,
+        // Token refresh must be persisted; the controller owns that write.
+        ...(typeof this.#onTokensRefreshed === 'function'
+          ? { onTokensRefreshed: this.#onTokensRefreshed } : {}),
       });
       this.#api = api;
       if (this.#state.cursor() === null) {

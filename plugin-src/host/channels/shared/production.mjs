@@ -113,6 +113,10 @@ export async function createTokenProductionController(ctx, config, internals, de
     ...(fileIngressExecutor ? { fileIngressExecutor } : {}),
   });
   const modelCatalog = () => listModelCatalog(harness);
+  // Assigned just below. A transport may need to write a rotated token back
+  // through the controller, which is only constructible after createRuntime is
+  // defined, so the reference is held in a slot rather than captured directly.
+  let controllerRef = null;
   const coreController = new ResolvedController({
     credentials: ctx.credentials,
     configStore: observedConfigStore,
@@ -136,7 +140,7 @@ export async function createTokenProductionController(ctx, config, internals, de
       botWorkspaceFor: (botId) => workspaces.workspaceFor(botId),
       defaultWorkspace,
     } : {}),
-    createRuntime: async ({ botId, config: botConfig, token }) => {
+    createRuntime: async ({ botId, config: botConfig, token, credential }) => {
       const state = await stateFor(botId);
       await workspaces.ensure(botId, {
         defaultAgentPreset: config.agentPreset,
@@ -145,10 +149,19 @@ export async function createTokenProductionController(ctx, config, internals, de
       const workspaceScope = createBotWorkspaceScope(harness, {
         botId, workspaces, state, agentPresetCatalog,
       });
+      const persistTokens = typeof definitions.persistBotCredential === 'function'
+        ? (tokens) => definitions.persistBotCredential({
+          botId, config: botConfig, tokens, controller: controllerRef,
+        })
+        : null;
       return new ResolvedRuntime({
         ...channelRuntimeOptions,
         config: botConfig,
         token,
+        // The mailbox may authenticate with an OAuth pair instead of a password.
+        ...(credential ? { credential } : {}),
+        // A transport that rotates its tokens needs them written back.
+        ...(persistTokens ? { onTokensRefreshed: persistTokens } : {}),
         harness: workspaceScope.harness,
         state: workspaceScope.state,
         contextEnhancement: { botId, getSettings: () => workspaces.contextEnhancementFor(botId) },
@@ -177,6 +190,7 @@ export async function createTokenProductionController(ctx, config, internals, de
       }
     },
   });
+  controllerRef = coreController;
   const controller = createWorkspaceAwareController(coreController, {
     workspaces,
     stateFor,
