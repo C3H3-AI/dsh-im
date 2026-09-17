@@ -553,3 +553,73 @@ test('re-initializing does not tear down a running mailbox runtime', async () =>
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+test('the mailbox transport is selected from its configuration', async () => {
+  // One channel hosts every mail protocol: the configured transport key picks
+  // the implementation, so a new protocol is a new transport, not a channel.
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const {
+    EMAIL_TRANSPORTS, DEFAULT_EMAIL_TRANSPORT, normalizeEmailTransport,
+  } = await import('../../../src/channels/email/config-store.mjs');
+
+  assert.ok(Object.hasOwn(EMAIL_TRANSPORTS, DEFAULT_EMAIL_TRANSPORT));
+  assert.equal(normalizeEmailTransport(undefined), DEFAULT_EMAIL_TRANSPORT);
+  assert.equal(normalizeEmailTransport('AGENT-MAIL'), 'agent-mail');
+  assert.throws(() => normalizeEmailTransport('carrier-pigeon'), TypeError);
+
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-transport-'));
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    await store.save({
+      platformId: 'bot@qq.com', name: 'bot@qq.com', provider: 'qq',
+      transport: 'agent-mail', allowedSenders: ['boss@example.com'],
+    });
+    const [bot] = store.list();
+    assert.equal(bot.transport, 'agent-mail', 'the transport persists');
+
+    const used = [];
+    const controller = new EmailController({
+      credentials: {
+        async resolve() { return { value: JSON.stringify({ address: 'bot@qq.com', password: 'p' }) }; },
+        async set() {}, async unset() {},
+      },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: {
+        'imap-smtp': () => {
+          used.push('imap-smtp');
+          return {
+            connect: async () => {}, disconnect: async () => {}, latestUid: async () => 0,
+            listMessages: async () => [], sendReply: async () => {}, sendText: async () => {},
+          };
+        },
+        'agent-mail': () => {
+          used.push('agent-mail');
+          // A complete stub: the contract check would reject anything less.
+          return {
+            connect: async () => {}, disconnect: async () => {}, latestUid: async () => 0,
+            listMessages: async () => [], sendReply: async () => {}, sendText: async () => {},
+          };
+        },
+      },
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+    });
+    await controller.bindMailbox({
+      address: 'bot@qq.com', transport: 'agent-mail', allowedSenders: ['boss@example.com'],
+    });
+    assert.deepEqual(used, ['agent-mail'], 'the configured transport is the one constructed');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('an incomplete transport is rejected at the boundary', async () => {
+  const { assertTransport, TRANSPORT_METHODS } = await import(
+    '../../../src/channels/email/transport.mjs'
+  );
+  assert.ok(TRANSPORT_METHODS.includes('listMessages'));
+  assert.throws(() => assertTransport(null), TypeError);
+  assert.throws(() => assertTransport({ connect: () => {} }), /must implement/);
+  const complete = Object.fromEntries(TRANSPORT_METHODS.map((m) => [m, () => {}]));
+  assert.equal(assertTransport(complete), complete);
+});

@@ -13,6 +13,37 @@ const IDENTITY_OPTIONS = Object.freeze({
 const EMAIL_ADDRESS = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 const HOSTNAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i;
 
+/**
+ * How the mailbox is reached. Each value maps to one transport implementation,
+ * so adding a mail protocol adds a transport rather than another channel.
+ */
+export const EMAIL_TRANSPORTS = Object.freeze({
+  'imap-smtp': Object.freeze({
+    key: 'imap-smtp',
+    label: 'IMAP / SMTP（任意邮箱）',
+    // Needs the address plus an app password, and knows its server hosts.
+    fields: Object.freeze(['address', 'password', 'provider', 'hosts', 'allowedSenders']),
+  }),
+  'agent-mail': Object.freeze({
+    key: 'agent-mail',
+    label: '腾讯 Agent 邮箱',
+    // Authorizes by QR code, so no password and no server hosts.
+    fields: Object.freeze(['address', 'allowedSenders']),
+  }),
+});
+
+export const DEFAULT_EMAIL_TRANSPORT = 'imap-smtp';
+
+/** Normalize a transport key, defaulting to the standard IMAP/SMTP one. */
+export function normalizeEmailTransport(value) {
+  const key = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (!key) return DEFAULT_EMAIL_TRANSPORT;
+  if (!Object.hasOwn(EMAIL_TRANSPORTS, key)) {
+    throw new TypeError(`Unsupported email transport: ${value}`);
+  }
+  return key;
+}
+
 /** Well-known provider presets so users do not have to know IMAP/SMTP hosts. */
 export const EMAIL_PROVIDERS = Object.freeze({
   qq: Object.freeze({
@@ -81,12 +112,16 @@ function normalizeHost(value, label) {
  */
 function normalizeEmailBotExtension(value) {
   const provider = typeof value.provider === 'string' ? value.provider.trim() : undefined;
-  const present = ['provider', 'imapHost', 'imapPort', 'smtpHost', 'smtpPort', 'allowedSenders'];
+  const present = ['transport', 'provider', 'imapHost', 'imapPort', 'smtpHost', 'smtpPort', 'allowedSenders'];
   if (!present.some((key) => Object.hasOwn(value, key))) return {};
   const preset = EMAIL_PROVIDERS[provider] ?? null;
   try {
     const policy = normalizeEmailAccessPolicy({ allowedSenders: value.allowedSenders ?? [] });
+    const transport = Object.hasOwn(value, 'transport')
+      ? normalizeEmailTransport(value.transport)
+      : undefined;
     return {
+      ...(transport ? { transport } : {}),
       ...(provider ? { provider } : {}),
       imapHost: normalizeHost(value.imapHost, 'imapHost') ?? preset?.imapHost,
       imapPort: normalizePort(value.imapPort, preset?.imapPort ?? 993, 'imapPort'),

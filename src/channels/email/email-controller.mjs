@@ -3,7 +3,13 @@ import {
   createAccessPolicy,
   createAccessPolicyScope,
 } from '../shared/access-policy.mjs';
-import { EmailApi } from './email-api.mjs';
+import { assertTransport } from './transport.mjs';
+import { ImapSmtpTransport } from './transports/imap-smtp.mjs';
+import {
+  DEFAULT_EMAIL_TRANSPORT,
+  EMAIL_TRANSPORTS,
+  normalizeEmailTransport,
+} from './config-store.mjs';
 import {
   EMAIL_PROVIDERS,
   EmailConfigStore,
@@ -28,7 +34,7 @@ export class EmailController {
   #credentials;
   #configStore;
   #createRuntime;
-  #createApi;
+  #transports;
   #syncAccessPolicy;
   #stateFor;
   #listWorkspaceSessions;
@@ -48,7 +54,9 @@ export class EmailController {
     createRuntime,
     deleteState = async () => {},
     logger = console,
-    createApi = (options) => new EmailApi(options),
+    // Transport implementations by key. A new mail protocol is a new entry
+    // here, not another channel.
+    transports = { 'imap-smtp': (options) => new ImapSmtpTransport(options) },
     // Host-owned hook: the mailbox allowlist and the Harness access policy are
     // two separate stores, so a changed allowlist must be pushed into the
     // policy or the channel keeps rejecting the new senders.
@@ -72,7 +80,10 @@ export class EmailController {
     this.#credentials = credentials;
     this.#configStore = configStore;
     this.#createRuntime = createRuntime;
-    this.#createApi = createApi;
+    if (!transports || typeof transports !== 'object') {
+      throw new TypeError('EmailController requires a transport registry');
+    }
+    this.#transports = transports;
     this.#syncAccessPolicy = typeof syncAccessPolicy === 'function' ? syncAccessPolicy : null;
     this.#stateFor = typeof stateFor === 'function' ? stateFor : null;
     this.#listWorkspaceSessions = typeof listWorkspaceSessions === 'function'
@@ -109,21 +120,35 @@ export class EmailController {
   /** Connect one mailbox. The password is verified against IMAP/SMTP before it
    * is persisted, so a bad app password fails here rather than silently
    * producing a bot that never receives mail. */
-  async bindMailbox({ address, password, provider, imapHost, imapPort, smtpHost, smtpPort, allowedSenders } = {}) {
+  async bindMailbox({
+    address, password, provider, transport, imapHost, imapPort, smtpHost, smtpPort, allowedSenders,
+  } = {}) {
     if (this.#closed) throw new Error(`${EMAIL_DESCRIPTOR.label} controller is closed`);
     const normalizedAddress = normalizeEmailAddress(address);
-    const credential = normalizeCredential({ address: normalizedAddress, password });
+    const transportKey = normalizeEmailTransport(transport);
+    const definition = EMAIL_TRANSPORTS[transportKey];
+    // Only the IMAP/SMTP transport needs a password; others authorize another
+    // way (the Agent mailbox does so by QR code).
+    const needsPassword = definition.fields.includes('password');
+    const credential = needsPassword
+      ? normalizeCredential({ address: normalizedAddress, password })
+      : { address: normalizedAddress };
     if (!credential) throw new TypeError(t('邮箱地址与应用密码均为必填'));
-    const preset = EMAIL_PROVIDERS[provider] ?? null;
+    // Server hosts only apply to transports that speak a mail protocol.
+    const needsHosts = definition.fields.includes('hosts');
+    const preset = needsHosts ? EMAIL_PROVIDERS[provider] ?? null : null;
     const security = {
-      provider: preset?.key ?? 'custom',
-      imapHost: imapHost || preset?.imapHost,
-      imapPort: imapPort ?? preset?.imapPort ?? 993,
-      smtpHost: smtpHost || preset?.smtpHost,
-      smtpPort: smtpPort ?? preset?.smtpPort ?? 465,
+      transport: transportKey,
+      ...(needsHosts ? { provider: preset?.key ?? 'custom' } : {}),
+      ...(needsHosts ? {
+        imapHost: imapHost || preset?.imapHost,
+        imapPort: imapPort ?? preset?.imapPort ?? 993,
+        smtpHost: smtpHost || preset?.smtpHost,
+        smtpPort: smtpPort ?? preset?.smtpPort ?? 465,
+      } : {}),
       allowedSenders: normalizeEmailAccessPolicy({ allowedSenders }).allowedSenders,
     };
-    if (!security.imapHost || !security.smtpHost) {
+    if (needsHosts && (!security.imapHost || !security.smtpHost)) {
       throw new TypeError(t('请选择邮箱服务商或填写 IMAP/SMTP 服务器地址'));
     }
     if (security.allowedSenders.length === 0) {
@@ -137,8 +162,8 @@ export class EmailController {
       // resolve() returns a wrapper; the plain secret lives on .value.
       const previousResult = await this.#credentials.resolve(identity.tokenRef).catch(() => undefined);
       const previousCredential = previousResult?.value;
-      const probe = this.#createApi({
-        config: { address: normalizedAddress, password, ...security },
+      const probe = this.#createTransport({
+        address: normalizedAddress, password, ...security,
       });
       try {
         await probe.connect();
@@ -426,6 +451,20 @@ export class EmailController {
       this.#logger.warn?.('[dsh-im:email] failed to sync the access policy:', error);
       throw new Error(t('邮箱访问策略同步失败，请重试'));
     }
+  }
+
+  /**
+   * Instantiate the transport a mailbox is configured to use. The registry is
+   * injected so tests can substitute one, and an unknown key falls back to the
+   * default rather than failing the whole channel.
+   */
+  #createTransport(config) {
+    const key = normalizeEmailTransport(config?.transport ?? DEFAULT_EMAIL_TRANSPORT);
+    const factory = this.#transports[key] ?? this.#transports[DEFAULT_EMAIL_TRANSPORT];
+    if (typeof factory !== 'function') {
+      throw new TypeError(`No transport registered for ${key}`);
+    }
+    return assertTransport(factory({ config }), `email transport ${key}`);
   }
 
   #requireConfig(botId) {
