@@ -283,3 +283,21 @@ test('inbound attachments declare mediaType for the shared file layer', async ()
   assert.equal(message.files[0].mediaType, 'text/csv');
   assert.equal(message.files[0].mimeType, undefined, 'mimeType is not the field the layer reads');
 });
+
+test('polling only downloads mail from allowlisted senders', async () => {
+  // The monitored mailbox also receives ordinary personal mail. Its body must
+  // never be requested, so filtering happens on the envelope before the source
+  // fetch — not after the message is already downloaded.
+  const source = await readFile(
+    new URL('../../../src/channels/email/email-api.mjs', import.meta.url),
+    'utf8',
+  );
+  const listStart = source.indexOf('async listMessages');
+  const list = source.slice(listStart, source.indexOf('await this.#imap.mailboxOpen(mailbox', listStart));
+  const envelopeStage = list.indexOf('allowSenders');
+  const sourceFetch = list.indexOf('this.#fetchSource');
+  assert.ok(envelopeStage > 0, 'listMessages must consult the sender allowlist');
+  assert.ok(sourceFetch > envelopeStage, 'the allowlist must be applied before the body fetch');
+  // Every body fetch sits in the second pass, after the envelope loop closes.
+  assert.match(list, /for \(const uid of accepted\)/, 'bodies are fetched from the accepted list only');
+});

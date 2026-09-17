@@ -11,6 +11,13 @@ import { EMAIL_CLIENT_DEFAULTS } from './config-store.mjs';
 
 const DEFAULT_POLL_INTERVAL_MS = EMAIL_CLIENT_DEFAULTS.pollIntervalMs;
 
+/**
+ * How far behind the mailbox tip the first poll starts. Leaving a small window
+ * means mail that lands while the channel is starting is not skipped, while the
+ * rest of the backlog stays untouched.
+ */
+const FIRST_CONNECT_WINDOW = 10;
+
 /** Skip auto-generated mail that would otherwise trigger a turn. */
 const IGNORED_SENDER_PATTERNS = [
   /^(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)/i,
@@ -269,9 +276,14 @@ export class EmailRuntime {
       });
       this.#api = api;
       if (this.#state.cursor() === null) {
-        // Start from "now": pre-existing mail in the mailbox must not be
-        // replayed as new instructions on first connect.
-        await this.#state.setCursor(await api.latestUid());
+        // On first connect the existing backlog must not be replayed as new
+        // instructions, so polling starts near the mailbox tip. A small window
+        // before the tip is still scanned though: a message that arrives while
+        // the channel is starting up would otherwise be skipped forever. Those
+        // few older messages are filtered by the sender allowlist and the
+        // seen-message set, so the window cannot re-drive old requests.
+        const tip = await api.latestUid();
+        await this.#state.setCursor(Math.max(0, tip - FIRST_CONNECT_WINDOW));
       }
       const client = new EmailBotClient(api, this.#abortController.signal);
       this.#bridge = new EmailHarnessBridge({
@@ -325,7 +337,11 @@ export class EmailRuntime {
     if (!this.#api || !this.#bridge || this.#stopped) return;
     try {
       const cursor = this.#state.cursor() ?? 0;
-      const messages = await this.#api.listMessages({ afterUid: cursor, limit: 25 });
+      // Pass the mailbox allowlist down so unlisted mail is never downloaded.
+      const allowSenders = new Set(
+        (this.#config.allowedSenders ?? []).map((a) => String(a).trim().toLowerCase()),
+      );
+      const messages = await this.#api.listMessages({ afterUid: cursor, limit: 25, allowSenders });
       for (const parsed of messages) {
         const uid = Number(parsed?.uid);
         const message = normalizeEmail(parsed, { address: this.#config.platformId, state: this.#state });

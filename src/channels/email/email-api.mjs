@@ -143,30 +143,62 @@ export class EmailApi {
   }
 
   /**
-   * Fetch messages with a UID greater than `afterUid`. Bodies are parsed lazily
-   * so a poll of headers stays cheap when nothing new arrives.
+   * Fetch messages with a UID greater than `afterUid`.
+   *
+   * The sender is read from the lightweight envelope first and checked against
+   * `allowSenders` before the body is requested. A monitored mailbox also
+   * receives ordinary personal mail, and that content must not be downloaded
+   * or parsed at all — not merely filtered after the fact.
    */
-  async listMessages({ afterUid = 0, limit = 25 } = {}) {
+  async listMessages({ afterUid = 0, limit = 25, allowSenders = null } = {}) {
     await this.connect();
     const mailbox = this.#config.mailbox ?? 'INBOX';
-    const found = [];
+    const allowed = allowSenders instanceof Set && allowSenders.size > 0 ? allowSenders : null;
+
+    // Step 1: read only the lightweight envelopes. ImapFlow cannot run a second
+    // fetch while one is being iterated, so the accepted UIDs are collected
+    // first and their bodies pulled afterwards.
+    const accepted = [];
     for await (const message of this.#imap.fetch(
       { uid: `${afterUid + 1}:*` },
-      { uid: true, source: true, flags: true },
+      { uid: true, envelope: true },
       { uid: true },
     )) {
       // A range fetch that matches nothing still yields the last message, so
       // the UID bound is re-checked here.
       if (!Number.isFinite(message.uid) || message.uid <= afterUid) continue;
-      const parsed = await simpleParser(message.source);
+      if (allowed) {
+        const from = normalizeAddress(message.envelope?.from?.[0]?.address);
+        if (!from || !allowed.has(from)) continue;
+      }
+      accepted.push(message.uid);
+      if (accepted.length >= limit) break;
+    }
+
+    // Step 2: fetch and parse the bodies of accepted senders only. Mail from
+    // anyone else is never downloaded, so its content is not read at all.
+    const found = [];
+    for (const uid of accepted) {
+      const source = await this.#fetchSource(uid);
+      if (!source) continue;
+      const parsed = await simpleParser(source);
       // Carry the UID alongside the parsed mail: it is the polling cursor and
       // is not part of the RFC822 source.
-      parsed.uid = message.uid;
+      parsed.uid = uid;
       found.push(parsed);
-      if (found.length >= limit) break;
     }
     await this.#imap.mailboxOpen(mailbox, { readOnly: false }).catch(() => {});
     return found;
+  }
+
+  /** Read one message's RFC822 source by UID. */
+  async #fetchSource(uid) {
+    try {
+      const message = await this.#imap.fetchOne(String(uid), { source: true }, { uid: true });
+      return message?.source ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /** Send a reply inside the originating thread. */
