@@ -26,8 +26,11 @@ import {
 import { EmailStateStore } from './state-store.mjs';
 import { EMAIL_DESCRIPTOR } from './email-bridge.mjs';
 
-/** How long a QR authorization stays valid before it must be restarted. */
-const AGENT_MAIL_AUTH_TTL_MS = 300_000;
+/**
+ * Fallback validity window for a QR authorization, used only when the server
+ * does not state one. Normally the server's `expires_in` governs.
+ */
+const AGENT_MAIL_AUTH_TTL_MS = 600_000;
 
 /**
  * Credential payload for one mailbox.
@@ -573,14 +576,18 @@ export class EmailController {
       throw new TypeError(t('该接入方式不需要扫码授权'));
     }
     const device = await startAgentMailDeviceFlow({ hostname });
-    this.#pendingAuth = { transport: key, pollUrl: device.pollUrl, startedAt: Date.now() };
+    // The server states the validity window; a hard-coded one silently
+    // abandoned authorizations (and reported a shorter window in the UI).
+    const expiresAt = Date.now() + (device.expiresInMs ?? AGENT_MAIL_AUTH_TTL_MS);
+    this.#pendingAuth = { transport: key, pollUrl: device.pollUrl, startedAt: Date.now(), expiresAt };
     return {
       transport: key,
       // The authorization page embeds its own WeChat QR, so the URL is what the
       // user opens or scans; there is no one-shot scan payload to render.
       browserUrl: device.browserUrl,
       inputCode: device.inputCode,
-      expiresAt: this.#pendingAuth.startedAt + AGENT_MAIL_AUTH_TTL_MS,
+      expiresAt,
+      expiresInMs: expiresAt - Date.now(),
     };
   }
 
@@ -591,7 +598,7 @@ export class EmailController {
   async pollAuthorization() {
     const pending = this.#pendingAuth;
     if (!pending) throw new TypeError(t('扫码授权尚未开始'));
-    if (Date.now() - pending.startedAt > AGENT_MAIL_AUTH_TTL_MS) {
+    if (Date.now() > pending.expiresAt) {
       this.#pendingAuth = null;
       throw new TypeError(t('扫码授权已超时，请重新发起'));
     }

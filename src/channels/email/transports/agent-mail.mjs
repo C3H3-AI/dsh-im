@@ -41,7 +41,10 @@ export const AGENT_MAIL_DEVICE = Object.freeze({
   clientVersion: CLIENT_VERSION,
   userAgent: USER_AGENT,
   pollIntervalMs: 5_000,
-  pollTimeoutMs: 300_000,
+  // Fallback only: the server states expires_in per flow (currently 600s) and
+  // startAgentMailDeviceFlow returns that. Assuming a shorter window abandons
+  // authorizations the server still considers valid.
+  pollTimeoutMs: 600_000,
 });
 
 /**
@@ -76,10 +79,16 @@ export async function startAgentMailDeviceFlow({
   if (!body?.poll_url) {
     throw new AgentMailError('device flow returned no poll_url', { code: 'device-flow-invalid' });
   }
+  const expiresIn = Number(body.expires_in);
   return {
     pollUrl: String(body.poll_url),
     browserUrl: String(body.browser_url ?? ''),
     inputCode: String(body.input_code ?? ''),
+    // The server states how long the code stays valid; honour it rather than
+    // assuming a window, which previously expired the flow early.
+    expiresInMs: Number.isFinite(expiresIn) && expiresIn > 0
+      ? expiresIn * 1_000
+      : AGENT_MAIL_DEVICE.pollTimeoutMs,
   };
 }
 

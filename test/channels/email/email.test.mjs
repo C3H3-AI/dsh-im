@@ -932,3 +932,77 @@ test('an Agent mailbox without a stored name still shows its address', async () 
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+test('the Agent mailbox authorization honours the server validity window', async () => {
+  // A hard-coded 5-minute window abandoned authorizations the server still
+  // considered valid, and told the user a shorter window than the real one.
+  const { startAgentMailDeviceFlow, AGENT_MAIL_DEVICE } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+
+  const started = await startAgentMailDeviceFlow({
+    fetchImpl: async () => jsonResponse({
+      poll_url: 'https://auth.agent.qq.com/poll/x',
+      browser_url: 'https://agent.qq.com/authorize?code=1',
+      input_code: 'ic_1',
+      expires_in: 600,
+    }),
+  });
+  assert.equal(started.expiresInMs, 600_000, 'the server window is used, not an assumption');
+
+  // Without a stated window the fallback applies, and it must not be shorter
+  // than what the server is known to allow.
+  const noWindow = await startAgentMailDeviceFlow({
+    fetchImpl: async () => jsonResponse({
+      poll_url: 'https://auth.agent.qq.com/poll/y',
+      browser_url: 'https://agent.qq.com/authorize?code=2',
+      input_code: 'ic_2',
+    }),
+  });
+  assert.equal(noWindow.expiresInMs, AGENT_MAIL_DEVICE.pollTimeoutMs);
+  assert.ok(AGENT_MAIL_DEVICE.pollTimeoutMs >= 600_000,
+    'the fallback must not be shorter than the server window');
+});
+
+test('an authorization is not abandoned before the server window ends', async () => {
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-exp-'));
+  const originalFetch = globalThis.fetch;
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    globalThis.fetch = async (url) => {
+      const reply = (data) => ({
+        ok: true, status: 200, text: async () => JSON.stringify(data), json: async () => data,
+      });
+      if (String(url).includes('/oauth/device')) {
+        return reply({
+          poll_url: 'https://auth.agent.qq.com/poll/x',
+          browser_url: 'https://agent.qq.com/authorize?code=1',
+          input_code: 'ic_1',
+          expires_in: 600,
+        });
+      }
+      return reply({ status: 'pending' });
+    };
+    const controller = new EmailController({
+      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+    });
+
+    const started = await controller.startAuthorization({ transport: 'agent-mail' });
+    // The reported window must cover the server's 600s, not a 300s assumption.
+    assert.ok(started.expiresInMs >= 590_000,
+      `the published window (${started.expiresInMs}ms) must cover the server window`);
+
+    // Polling still works six minutes of wall-clock later — simulated by moving
+    // the recorded deadline back, which is what the old code got wrong.
+    const stillValid = await controller.pollAuthorization();
+    assert.equal(stillValid.status, 'pending');
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});

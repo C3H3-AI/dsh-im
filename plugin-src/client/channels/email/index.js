@@ -55,6 +55,16 @@ function field(label, control, hint) {
 }
 
 /**
+ * The "waiting for authorization" line, split into translatable pieces. The
+ * validity window is the server's, not an assumed one.
+ */
+function waitingHint(session) {
+  const minutes = session?.expiresInMs ? Math.round(session.expiresInMs / 60_000) : null;
+  if (!minutes) return ['等待授权中…'];
+  return ['等待授权中，', String(minutes), ' 分钟', '内有效，可保持本页打开。'];
+}
+
+/**
  * QR authorization for the Agent mailbox.
  *
  * There is no one-shot scan payload: the authorization page embeds its own
@@ -135,7 +145,12 @@ function AgentMailAuth({ rpcCall, endpoints, disabled, onAuthorized, onError }) 
             h('code', null, session.inputCode))
           : null,
         h('p', { className: 'dim-emailHint' },
-          status === 'waiting' ? '等待授权中…（最多 5 分钟，可在此页保持打开）' : null))
+          status === 'waiting'
+            // Plain strings only (a template literal with mixed quotes trips the
+            // i18n guard), and the window comes from the server rather than an
+            // assumed five minutes.
+            ? h('span', null, ...waitingHint(session))
+            : null))
       : null,
     error ? h('p', { className: 'dim-inlineError', role: 'alert' }, error.message ?? String(error)) : null,
     h('div', { className: 'ddt-actions dim-viewActions' },

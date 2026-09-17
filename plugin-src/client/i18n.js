@@ -1045,6 +1045,17 @@ const EN = Object.freeze({
   '清除绑定': 'Clear binding',
   '所有发件人同上': 'Point every sender at the same session',
   '已选：': 'Selected: ',
+  '接入方式': 'Access method',
+  '生成授权链接': 'Generate authorization link',
+  '重新生成': 'Regenerate',
+  '授权链接': 'Authorization link',
+  '配对码': 'Pairing code',
+  '等待授权中…': 'Waiting for authorization…',
+  '等待授权中，': 'Waiting for authorization — valid for ',
+  ' 分钟': ' minutes',
+  '内有效，可保持本页打开。': '; you can keep this page open.',
+  '授权成功，正在接入邮箱…': 'Authorized; connecting the mailbox…',
+  '腾讯 Agent 邮箱需要微信扫码授权。点下面的按钮生成授权链接，在打开的页面里用微信扫码登录并确认。': 'The Tencent Agent mailbox authorizes with a WeChat QR code. Generate an authorization link, then scan it with WeChat on the page that opens and confirm.',
   '请求失败': 'The request failed',
 });
 
