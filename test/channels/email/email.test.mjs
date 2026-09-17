@@ -1286,3 +1286,52 @@ test('binding an Agent mailbox carries the OAuth tokens through', async () => {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+test('a failed startup reports a usable reason', async () => {
+  // An AggregateError carries an empty message with the reason on `code`
+  // (ECONNREFUSED and friends). `??` does not fall through an empty string, so
+  // the settings card showed a blank error and could not be acted on.
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-safeerror-'));
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    await store.save({
+      platformId: 'x@agent.qq.com', transport: 'agent-mail',
+      allowedSenders: ['boss@example.com'],
+    });
+    const refused = new AggregateError([]);
+    refused.code = 'ECONNREFUSED';
+    const controller = new EmailController({
+      credentials: {
+        async resolve() {
+          return { value: JSON.stringify({ address: 'x@agent.qq.com', accessToken: 't' }) };
+        },
+        async set() {}, async unset() {},
+      },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: {
+        'imap-smtp': () => ({}),
+        'agent-mail': () => ({
+          connect: async () => { throw refused; },
+          disconnect: async () => {}, latestUid: async () => 0,
+          listMessages: async () => [], sendReply: async () => {}, sendText: async () => {},
+        }),
+      },
+      // The failure surfaces when the runtime starts, which is where a
+      // connection refusal lands.
+      createRuntime: async () => ({
+        start: async () => { throw refused; },
+        stop: async () => {},
+        status: {},
+      }),
+    });
+    const status = await controller.initialize();
+    const bot = status.bots.find((b) => b.bot.name === 'x@agent.qq.com');
+    assert.ok(bot?.error, 'the failure is recorded');
+    assert.ok(String(bot.error.message).trim().length > 0,
+      `the reason must not be blank (got ${JSON.stringify(bot.error.message)})`);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});

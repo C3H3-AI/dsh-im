@@ -696,7 +696,15 @@ export class EmailController {
   }
 
   #safeError(code, error) {
-    return { code, message: error?.message ?? String(error) };
+    // An AggregateError commonly carries an empty message with the real reason
+    // on `code` (ECONNREFUSED etc.). `??` does not fall through an empty
+    // string, so an empty message used to be reported as an empty error.
+    const message = String(error?.message ?? '').trim();
+    const detail = message
+      || String(error?.code ?? '').trim()
+      || String(error?.cause?.message ?? '').trim()
+      || String(error ?? '').trim();
+    return { code, message: detail || code };
   }
 
   #touch() {
