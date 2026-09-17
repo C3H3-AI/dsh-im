@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -249,4 +249,37 @@ test('EmailController reads the mailbox secret from the credential wrapper', asy
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
+});
+
+test('outbound artifacts use the shared materialized field names', async () => {
+  // The artifact layer materializes files as { fileName, mediaType, bytes };
+  // reading { name, content } instead silently sent an unnamed empty attachment.
+  const source = await readFile(
+    new URL('../../../src/channels/email/email-runtime.mjs', import.meta.url),
+    'utf8',
+  );
+  const mapping = source.slice(source.indexOf('#attachmentFrom('), source.indexOf('async sendFile'));
+  assert.match(mapping, /file\?\.fileName/, 'the artifact file name lives on .fileName');
+  assert.match(mapping, /file\?\.bytes/, 'the artifact payload lives on .bytes');
+  assert.match(mapping, /file\?\.mediaType/, 'the artifact type lives on .mediaType');
+  // .content may only appear as a trailing fallback, never as the primary read.
+  assert.match(mapping, /file\?\.bytes \?\? /, 'bytes must be the primary payload read');
+});
+
+test('inbound attachments declare mediaType for the shared file layer', async () => {
+  // inbound-file reads `mediaType`; a `mimeType` key is ignored.
+  const state = new EmailStateStore(join(tmpdir(), 'unused-email-state-6.json'));
+  const message = normalizeEmail({
+    messageId: '<attach@mail>',
+    from: { value: [{ address: 'boss@example.com' }] },
+    subject: 'Report',
+    text: 'See attached',
+    attachments: [{
+      filename: 'sales.csv', size: 8, contentType: 'text/csv',
+      content: Buffer.from('a,b\n1,2\n'),
+    }],
+  }, { address: BOT, state });
+  assert.equal(message.files.length, 1);
+  assert.equal(message.files[0].mediaType, 'text/csv');
+  assert.equal(message.files[0].mimeType, undefined, 'mimeType is not the field the layer reads');
 });

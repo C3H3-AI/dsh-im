@@ -70,7 +70,9 @@ export function normalizeEmail(parsed, { address, state } = {}) {
     files: attachments.map((attachment) => ({
       name: attachment.filename ?? 'attachment',
       size: attachment.size,
-      mimeType: attachment.contentType,
+      // The shared inbound-file layer reads `mediaType` (not `mimeType`), so an
+      // attachment type under any other key is silently dropped.
+      ...(attachment.contentType ? { mediaType: String(attachment.contentType) } : {}),
       // The bridge streams files via a loader so large attachments are not
       // held in memory until they are actually needed.
       load: async () => attachment.content,
@@ -116,27 +118,39 @@ class EmailBotClient {
     return Promise.resolve();
   }
 
+  /**
+   * Outbound artifacts arrive as the shared materialized shape
+   * ({ fileName, mediaType, bytes }), the same structure every other channel
+   * consumes — not the { name, content } form.
+   */
+  #attachmentFrom(file, fallbackName) {
+    const bytes = file?.bytes ?? file?.data ?? file?.content;
+    return {
+      filename: file?.fileName ?? file?.name ?? fallbackName,
+      content: bytes,
+      ...(file?.mediaType ? { contentType: file.mediaType } : {}),
+    };
+  }
+
   async sendFile(target, file) {
-    const content = typeof file?.load === 'function' ? await file.load() : file?.content;
     return this.#api.sendReply({
       to: target?.to,
       subject: target?.subject,
       text: '',
       inReplyTo: target?.messageId,
       references: target?.references,
-      attachments: [{ filename: file?.name ?? 'attachment', content }],
+      attachments: [this.#attachmentFrom(file, 'attachment')],
     });
   }
 
   async sendImage(target, image) {
-    const content = typeof image?.load === 'function' ? await image.load() : image?.content;
     return this.#api.sendReply({
       to: target?.to,
       subject: target?.subject,
       text: '',
       inReplyTo: target?.messageId,
       references: target?.references,
-      attachments: [{ filename: image?.name ?? 'image', content }],
+      attachments: [this.#attachmentFrom(image, 'image')],
     });
   }
 }
