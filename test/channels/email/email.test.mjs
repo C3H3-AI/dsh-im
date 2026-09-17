@@ -1101,3 +1101,79 @@ test('an expired pending authorization is refused', async () => {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+test('the status reports which transport a mailbox uses', async () => {
+  // Without this the settings page cannot tell an Agent mailbox from an
+  // IMAP/SMTP one, and describes it with server hosts it does not have.
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-transport-status-'));
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    await store.save({
+      platformId: 'bot@agent.qq.com', transport: 'agent-mail',
+      allowedSenders: ['boss@example.com'],
+    });
+    await store.save({
+      platformId: 'me@qq.com', provider: 'qq', allowedSenders: ['boss@example.com'],
+    });
+    const controller = new EmailController({
+      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+    });
+    const byAddress = Object.fromEntries(
+      controller.status().bots.map((bot) => [bot.bot.name, bot.transport]),
+    );
+    assert.equal(byAddress['bot@agent.qq.com'], 'agent-mail');
+    // A mailbox saved without a transport keeps the standard protocol.
+    assert.equal(byAddress['me@qq.com'], 'imap-smtp');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('a mailbox can switch transport', async () => {
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-switch-'));
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    await store.save({
+      platformId: 'me@qq.com', provider: 'qq', allowedSenders: ['boss@example.com'],
+    });
+    const [bot] = store.list();
+    const controller = new EmailController({
+      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+    });
+    await controller.updateMailboxSettings(bot.botId, { transport: 'agent-mail' });
+    const [updated] = store.list();
+    assert.equal(updated.transport, 'agent-mail');
+    // An unknown transport is refused rather than silently stored.
+    await assert.rejects(
+      () => controller.updateMailboxSettings(bot.botId, { transport: 'carrier-pigeon' }),
+      TypeError,
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('the client keeps the transport field from the host snapshot', async () => {
+  const { normalizeSnapshot } = await import(
+    '../../../plugin-src/client/channels/email/api.js'
+  );
+  const snapshot = normalizeSnapshot({
+    revision: 1,
+    bots: [{
+      botId: 'email_x', connected: true, state: 'connected',
+      transport: 'agent-mail', allowedSenders: ['boss@example.com'],
+      bot: { name: 'bot@agent.qq.com' }, health: { summary: 'ok' },
+    }],
+  });
+  assert.equal(snapshot.bots[0].transport, 'agent-mail');
+});

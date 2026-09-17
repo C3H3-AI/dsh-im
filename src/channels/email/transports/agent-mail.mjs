@@ -22,8 +22,6 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const POLL_TIMEOUT_MS = 25_000;
 /** How many messages one poll may return. */
 const DEFAULT_PAGE_SIZE = 25;
-/** Long-poll waits are cheap but must not spin when the server returns early. */
-const MIN_POLL_BACKOFF_MS = 1_000;
 
 export class AgentMailError extends Error {
   constructor(message, { code = 'agent-mail-error', status = null } = {}) {
@@ -439,47 +437,9 @@ export class AgentMailTransport {
     this.#email = String(primary?.email ?? '').trim();
     return aliasId;
   }
-
-  /**
-   * Wait for new mail. The event stream carries ids, so the messages are read
-   * back to keep one consistent shape for every transport.
-   */
-  async waitForMessages({ timeoutMs = POLL_TIMEOUT_MS, allowSenders = null } = {}) {
-    const aliasId = await this.#requireAlias();
-    const seconds = Math.max(1, Math.round(timeoutMs / 1_000));
-    const { status, body } = await this.#request(
-      'GET',
-      `/v1/aliases/${aliasId}/events/wait?timeout=${seconds}`,
-    );
-    if (status >= 400) {
-      throw new AgentMailError(`events/wait failed: HTTP ${status}`, {
-        code: 'watch-failed', status,
-      });
-    }
-    const events = Array.isArray(body?.data) ? body.data : [];
-    const ids = events
-      .map((event) => String(event?.message_id ?? event?.id ?? ''))
-      .filter(Boolean);
-    if (ids.length === 0) return [];
-    const allowed = allowSenders instanceof Set && allowSenders.size > 0 ? allowSenders : null;
-    const collected = [];
-    for (const id of ids) {
-      const read = await this.#request('GET', `/v1/aliases/${aliasId}/messages/${encodeURIComponent(id)}`);
-      if (read.status >= 400) continue;
-      const raw = read.body?.data ?? read.body;
-      if (allowed) {
-        const from = normalizeAddress(raw?.from?.email ?? raw?.from);
-        if (!from || !allowed.has(from)) continue;
-      }
-      collected.push(raw);
-    }
-    return this.#oldestFirst(collected, allowed);
-  }
 }
 
 /** Message ids travel with angle brackets; the API path does not use them. */
 function stripBrackets(value) {
   return String(value ?? '').replace(/^<|>$/g, '');
 }
-
-export { MIN_POLL_BACKOFF_MS };

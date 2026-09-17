@@ -239,6 +239,11 @@ export class EmailController {
     return this.#withBotTransition(botId, async () => {
       const config = this.#requireConfig(botId);
       const next = { ...config };
+      // A mailbox can move between protocols, so the transport is patchable
+      // like any other setting rather than fixed at bind time.
+      if (update.transport !== undefined) {
+        next.transport = normalizeEmailTransport(update.transport);
+      }
       if (update.provider !== undefined) next.provider = update.provider;
       if (update.imapHost !== undefined) next.imapHost = update.imapHost;
       if (update.imapPort !== undefined) next.imapPort = update.imapPort;
@@ -338,6 +343,10 @@ export class EmailController {
         // The raw address is already semi-public, but the UI shows the masked
         // form for consistency with other channels.
         platformId: maskEmailBotId(config.platformId),
+        // Which protocol this mailbox speaks. The settings page needs it to
+        // show the right form; without it an Agent mailbox was described with
+        // IMAP/SMTP fields it does not use.
+        transport: config.transport ?? DEFAULT_EMAIL_TRANSPORT,
         provider: config.provider,
         imapHost: config.imapHost,
         imapPort: config.imapPort,

@@ -23,6 +23,10 @@ function normalizeEmailBotExtension(value) {
   const senders = Array.isArray(value?.allowedSenders) ? value.allowedSenders : [];
   return {
     allowedSenders: senders.filter((entry) => typeof entry === 'string' && entry),
+    // Without this the settings page cannot tell an Agent mailbox from an
+    // IMAP/SMTP one, and shows server hosts that do not apply.
+    ...(typeof value?.transport === 'string' && value.transport
+      ? { transport: value.transport } : {}),
     ...(typeof value?.provider === 'string' && value.provider
       ? { provider: value.provider } : {}),
     ...(text(value?.imapHost) ? { imapHost: text(value.imapHost) } : {}),
