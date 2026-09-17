@@ -26,6 +26,13 @@ export const EMAIL_ENDPOINTS = Object.freeze({
 });
 export const EMAIL_RPC_ENDPOINTS = Object.freeze(Object.values(EMAIL_ENDPOINTS));
 
+/** The mailbox fields, with the addressing field removed. */
+function stripBotId(payload) {
+  if (!payload || typeof payload !== 'object') return {};
+  const { botId, update, ...rest } = payload;
+  return rest;
+}
+
 function failure(code, error) {
   return {
     ok: false,
@@ -104,7 +111,13 @@ export function createEmailRpcHandler(controller) {
       try {
         return {
           ok: true,
-          value: await controller.updateMailboxSettings(payload?.botId, payload?.update ?? {}),
+          // The client sends the mailbox fields flat alongside botId (as every
+          // other endpoint here does). Reading a nested `update` silently
+          // discarded the whole change: the call succeeded and nothing moved.
+          value: await controller.updateMailboxSettings(
+            payload?.botId,
+            payload?.update ?? stripBotId(payload),
+          ),
         };
       } catch (error) {
         return withRpcDetails({

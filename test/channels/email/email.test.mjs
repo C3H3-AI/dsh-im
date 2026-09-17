@@ -1532,3 +1532,39 @@ test('a mailbox whose identity cannot be read still authorizes', async () => {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+test('the mailbox update endpoint accepts the fields the client sends', async () => {
+  // The client sends mailbox fields flat beside botId, as every other endpoint
+  // does. The handler read a nested `update`, so the whole change was discarded
+  // and the call still reported success — the allowlist looked saved and was
+  // not.
+  const { createEmailRpcHandler } = await import(
+    '../../../plugin-src/host/channels/email/rpc.mjs'
+  );
+  const seen = [];
+  const controller = {
+    status: () => ({ revision: 0, bots: [], totals: { configured: 0, connected: 0 } }),
+    // The shared handler validates the whole controller surface before use.
+    async bindCredentials() {}, async bindMailbox() {}, async reconnectBot() {},
+    async deleteBot() {}, async setWorkspace() {}, async setModel() {},
+    async setAgentPreset() {}, async setContextEnhancement() {}, async setAccessPolicy() {},
+    async setAlias() {},
+    async updateMailboxSettings(botId, update) { seen.push({ botId, update }); return { ok: true }; },
+  };
+  const handler = createEmailRpcHandler(controller);
+
+  await handler('bot.mailbox.update', {
+    botId: 'email_1',
+    allowedSenders: ['a@x.com', 'b@y.com'],
+  });
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].botId, 'email_1');
+  assert.deepEqual(seen[0].update, { allowedSenders: ['a@x.com', 'b@y.com'] },
+    'the flat fields reach the controller');
+  assert.ok(!('botId' in seen[0].update), 'the addressing field is not passed through');
+
+  // The nested form keeps working for callers that use it.
+  await handler('bot.mailbox.update', { botId: 'email_1', update: { allowedSenders: ['c@z.com'] } });
+  assert.deepEqual(seen[1].update, { allowedSenders: ['c@z.com'] });
+});
