@@ -19,6 +19,7 @@ export default Object.freeze({
   '邮箱访问策略同步失败，请重试': 'Failed to sync the mailbox access policy; please retry',
   '当前环境不支持会话绑定': 'Session binding is not supported in this environment',
   '该接入方式不需要扫码授权': 'This access method does not use QR authorization',
+  '授权信息缺失，请重新扫码授权': 'The authorization is missing; please scan again',
   '扫码授权尚未开始': 'QR authorization has not been started',
   '扫码授权已超时，请重新发起': 'QR authorization timed out; please start it again',
 });

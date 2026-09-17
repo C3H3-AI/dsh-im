@@ -605,7 +605,11 @@ test('the mailbox transport is selected from its configuration', async () => {
       createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
     });
     await controller.bindMailbox({
-      address: 'bot@qq.com', transport: 'agent-mail', allowedSenders: ['boss@example.com'],
+      address: 'bot@qq.com', transport: 'agent-mail',
+      // An Agent mailbox authorizes by scan, so it needs the token pair rather
+      // than a password.
+      accessToken: 'AT', refreshToken: 'RT',
+      allowedSenders: ['boss@example.com'],
     });
     assert.deepEqual(used, ['agent-mail'], 'the configured transport is the one constructed');
   } finally {
@@ -1222,4 +1226,63 @@ test('the reply target carries both ids', () => {
   assert.equal(message.replyTarget.messageId, '<m1@mail.example>');
   assert.ok('transportMessageId' in message.replyTarget,
     'the transport id travels alongside the RFC one');
+});
+
+test('binding an Agent mailbox carries the OAuth tokens through', async () => {
+  // bindMailbox destructured only the password, so the scanned tokens were
+  // dropped before the credential probe: the Agent mailbox was probed with no
+  // token and failed as though the password were wrong.
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-bindtokens-'));
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    const written = [];
+    let probed = null;
+    const stub = () => ({
+      connect: async () => {}, disconnect: async () => {}, latestUid: async () => 0,
+      listMessages: async () => [], sendReply: async () => {}, sendText: async () => {},
+    });
+    const controller = new EmailController({
+      credentials: {
+        async resolve() { return null; },
+        async set(ref, value) { written.push({ ref, value }); },
+        async unset() {},
+      },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: {
+        'imap-smtp': stub,
+        'agent-mail': (options) => { probed = options.config; return stub(); },
+      },
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+    });
+
+    await controller.bindMailbox({
+      address: 'bot@agent.qq.com',
+      transport: 'agent-mail',
+      accessToken: 'AT-123',
+      refreshToken: 'RT-456',
+      allowedSenders: ['boss@corp.com'],
+    });
+
+    assert.equal(probed.transport, 'agent-mail');
+    assert.equal(probed.accessToken, 'AT-123', 'the probe receives the access token');
+    assert.equal(probed.refreshToken, 'RT-456');
+    const saved = JSON.parse(written[0].value);
+    assert.equal(saved.accessToken, 'AT-123', 'the token is persisted');
+    assert.equal(saved.refreshToken, 'RT-456');
+    assert.equal(store.list()[0].transport, 'agent-mail');
+
+    // Without a token the bind is refused with a message about authorizing,
+    // not about a missing password.
+    await assert.rejects(
+      () => controller.bindMailbox({
+        address: 'other@agent.qq.com', transport: 'agent-mail',
+        allowedSenders: ['boss@corp.com'],
+      }),
+      /授权/,
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 });

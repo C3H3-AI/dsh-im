@@ -153,7 +153,8 @@ export class EmailController {
    * is persisted, so a bad app password fails here rather than silently
    * producing a bot that never receives mail. */
   async bindMailbox({
-    address, password, provider, transport, imapHost, imapPort, smtpHost, smtpPort, allowedSenders,
+    address, password, accessToken, refreshToken, provider, transport,
+    imapHost, imapPort, smtpHost, smtpPort, allowedSenders,
   } = {}) {
     if (this.#closed) throw new Error(`${EMAIL_DESCRIPTOR.label} controller is closed`);
     const normalizedAddress = normalizeEmailAddress(address);
@@ -162,10 +163,17 @@ export class EmailController {
     // Only the IMAP/SMTP transport needs a password; others authorize another
     // way (the Agent mailbox does so by QR code).
     const needsPassword = definition.fields.includes('password');
+    // A standard mailbox carries an app password; the Agent mailbox carries the
+    // OAuth pair the scan produced. Dropping the pair here made the credential
+    // probe run without a token and fail as if the password were wrong.
     const credential = needsPassword
       ? normalizeCredential({ address: normalizedAddress, password })
-      : { address: normalizedAddress };
-    if (!credential) throw new TypeError(t('邮箱地址与应用密码均为必填'));
+      : normalizeCredential({ address: normalizedAddress, accessToken, refreshToken });
+    if (!credential) {
+      throw new TypeError(needsPassword
+        ? t('邮箱地址与应用密码均为必填')
+        : t('授权信息缺失，请重新扫码授权'));
+    }
     // Server hosts only apply to transports that speak a mail protocol.
     const needsHosts = definition.fields.includes('hosts');
     const preset = needsHosts ? EMAIL_PROVIDERS[provider] ?? null : null;
@@ -195,7 +203,11 @@ export class EmailController {
       const previousResult = await this.#credentials.resolve(identity.tokenRef).catch(() => undefined);
       const previousCredential = previousResult?.value;
       const probe = this.#createTransport({
-        address: normalizedAddress, password, ...security,
+        address: normalizedAddress,
+        ...(credential.password ? { password: credential.password } : {}),
+        ...(credential.accessToken ? { accessToken: credential.accessToken } : {}),
+        ...(credential.refreshToken ? { refreshToken: credential.refreshToken } : {}),
+        ...security,
       });
       try {
         await probe.connect();
