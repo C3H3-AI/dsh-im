@@ -6,7 +6,7 @@ import { dirname } from 'node:path';
  * Additional persisted keys a subclass may own. Kept intentionally small and
  * explicit: a subclass reads and writes them through extensionState().
  */
-const EXTENSION_KEYS = Object.freeze(['emailBindings', 'mailCursor']);
+const EXTENSION_KEYS = Object.freeze(['emailBindings', 'mailCursor', 'pendingAuth']);
 
 const EMPTY_STATE = Object.freeze({ version: 1, sessions: {}, seenMessageIds: [], cursor: null });
 

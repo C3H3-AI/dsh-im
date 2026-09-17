@@ -579,7 +579,11 @@ export class EmailController {
     // The server states the validity window; a hard-coded one silently
     // abandoned authorizations (and reported a shorter window in the UI).
     const expiresAt = Date.now() + (device.expiresInMs ?? AGENT_MAIL_AUTH_TTL_MS);
-    this.#pendingAuth = { transport: key, pollUrl: device.pollUrl, startedAt: Date.now(), expiresAt };
+    const pending = { transport: key, pollUrl: device.pollUrl, startedAt: Date.now(), expiresAt };
+    this.#pendingAuth = pending;
+    // Persisted too: the code outlives a reload, and losing it would strand an
+    // authorization the user already completed.
+    await this.#storePendingAuth(pending);
     return {
       transport: key,
       // The authorization page embeds its own WeChat QR, so the URL is what the
@@ -596,10 +600,13 @@ export class EmailController {
    * the caller can bind the mailbox without ever seeing a password.
    */
   async pollAuthorization() {
-    const pending = this.#pendingAuth;
+    // The in-memory copy is authoritative; the stored one survives a restart so
+    // a completed scan can still be redeemed.
+    const pending = this.#pendingAuth ?? await this.#loadPendingAuth();
     if (!pending) throw new TypeError(t('扫码授权尚未开始'));
     if (Date.now() > pending.expiresAt) {
       this.#pendingAuth = null;
+      await this.#storePendingAuth(null);
       throw new TypeError(t('扫码授权已超时，请重新发起'));
     }
     const result = await pollAgentMailDeviceFlow({ pollUrl: pending.pollUrl });
@@ -607,12 +614,34 @@ export class EmailController {
       return { status: result.status, authorized: false };
     }
     this.#pendingAuth = null;
+    await this.#storePendingAuth(null);
     return {
       status: 'authorized',
       authorized: true,
       accessToken: result.tokens.accessToken,
       refreshToken: result.tokens.refreshToken,
     };
+  }
+
+  /** Find the mailbox state that owns a pending authorization. */
+  async #stateForPendingAuth() {
+    if (!this.#stateFor) return null;
+    const [first] = this.#configStore.list();
+    if (!first) return null;
+    return this.#stateFor(first.botId).catch(() => null);
+  }
+
+  async #storePendingAuth(pending) {
+    const state = await this.#stateForPendingAuth();
+    await state?.setPendingAuth?.(pending).catch(() => {});
+  }
+
+  async #loadPendingAuth() {
+    const state = await this.#stateForPendingAuth();
+    const stored = state?.pendingAuth?.() ?? null;
+    if (!stored) return null;
+    if (Date.now() > stored.expiresAt) return null;
+    return stored;
   }
 
   /**

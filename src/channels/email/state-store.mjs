@@ -37,6 +37,32 @@ export class EmailStateStore extends ConversationStateStore {
   }
 
   /**
+   * A QR authorization in flight. Persisted because the code stays valid for
+   * ten minutes, which easily outlives a plugin reload — losing it meant an
+   * already-completed scan could never be redeemed.
+   */
+  pendingAuth() {
+    const value = this.extensionState().pendingAuth;
+    if (!value || typeof value !== 'object') return null;
+    if (typeof value.pollUrl !== 'string' || !value.pollUrl) return null;
+    if (!Number.isFinite(value.expiresAt)) return null;
+    return { pollUrl: value.pollUrl, expiresAt: value.expiresAt, transport: value.transport };
+  }
+
+  async setPendingAuth(value) {
+    if (!value) {
+      delete this.extensionState().pendingAuth;
+    } else {
+      this.extensionState().pendingAuth = {
+        pollUrl: String(value.pollUrl ?? ''),
+        expiresAt: Number(value.expiresAt ?? 0),
+        ...(value.transport ? { transport: String(value.transport) } : {}),
+      };
+    }
+    await this.persist();
+  }
+
+  /**
    * Fixed-session bindings, both scopes in one document:
    *   { account: <sessionId|null>, senders: { <address>: <sessionId> } }
    * A sender entry wins over the account default; with neither set the

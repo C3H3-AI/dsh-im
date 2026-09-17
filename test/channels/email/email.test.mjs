@@ -1006,3 +1006,98 @@ test('an authorization is not abandoned before the server window ends', async ()
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+test('a pending authorization survives a restart', async () => {
+  // The code stays valid for ten minutes, which outlives a plugin reload.
+  // Losing it stranded an authorization the user had already completed: the
+  // server answered "not started" while the scan had in fact succeeded.
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-persist-'));
+  const originalFetch = globalThis.fetch;
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    await store.save({
+      platformId: 'bot@agent.qq.com', transport: 'agent-mail',
+      allowedSenders: ['boss@example.com'],
+    });
+    const state = await new EmailStateStore(join(dir, 'state.json')).load();
+
+    let polls = 0;
+    globalThis.fetch = async (url) => {
+      const reply = (data) => ({
+        ok: true, status: 200, text: async () => JSON.stringify(data), json: async () => data,
+      });
+      if (String(url).includes('/oauth/device') && String(url).includes('func=1')) {
+        return reply({
+          poll_url: 'https://auth.agent.qq.com/poll/x',
+          browser_url: 'https://agent.qq.com/authorize?code=1',
+          input_code: 'ic_1', expires_in: 600,
+        });
+      }
+      polls += 1;
+      // The user completed the scan while the plugin was restarting.
+      return reply({ status: 'authorized', access_token: 'AT', refresh_token: 'RT' });
+    };
+
+    const build = () => new EmailController({
+      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+      stateFor: async () => state,
+    });
+
+    const first = build();
+    await first.startAuthorization({ transport: 'agent-mail' });
+    assert.ok(state.pendingAuth(), 'the pending code must be persisted');
+
+    // A fresh controller stands in for the restarted plugin: no in-memory copy.
+    const second = build();
+    const done = await second.pollAuthorization();
+    assert.equal(done.authorized, true, 'the completed scan is still redeemable');
+    assert.equal(done.accessToken, 'AT');
+    assert.equal(polls, 1, 'the stored poll URL is the one used');
+    assert.equal(state.pendingAuth(), null, 'a redeemed code is cleared');
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('an expired pending authorization is refused', async () => {
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-expiry-'));
+  const originalFetch = globalThis.fetch;
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    await store.save({
+      platformId: 'bot@agent.qq.com', transport: 'agent-mail',
+      allowedSenders: ['boss@example.com'],
+    });
+    const state = await new EmailStateStore(join(dir, 'state.json')).load();
+    // A code that expired while nobody was watching.
+    await state.setPendingAuth({
+      pollUrl: 'https://auth.agent.qq.com/poll/old',
+      expiresAt: Date.now() - 1_000,
+      transport: 'agent-mail',
+    });
+    globalThis.fetch = async () => ({
+      ok: true, status: 200,
+      text: async () => JSON.stringify({ status: 'authorized', access_token: 'X' }),
+      json: async () => ({ status: 'authorized', access_token: 'X' }),
+    });
+    const controller = new EmailController({
+      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+      stateFor: async () => state,
+    });
+    await assert.rejects(() => controller.pollAuthorization(), /超时|尚未开始/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});

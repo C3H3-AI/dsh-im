@@ -117,8 +117,12 @@ function AgentMailAuth({ rpcCall, endpoints, disabled, onAuthorized, onError }) 
         }
       } catch (pollError) {
         if (cancelled) return;
+        // Stop waiting and say so: silently dropping back to idle left the user
+        // staring at "connecting" while nothing was happening.
         setStatus('idle');
+        setSession(null);
         setError(pollError);
+        onError?.(pollError);
       }
     }, 3000);
     return () => { cancelled = true; clearInterval(timer); };
