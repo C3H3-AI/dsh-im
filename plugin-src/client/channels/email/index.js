@@ -128,9 +128,17 @@ function SessionBindingPanel({ account, rpcCall, endpoints, onChanged, disabled 
   const [error, setError] = React.useState(null);
   const [notice, setNotice] = React.useState(null);
 
+  // The card receives the raw RPC bridge, whose response wraps the payload in
+  // { ok, value }; the settings panel works with the unwrapped value.
   const invoke = React.useCallback(async (endpoint, payload) => {
-    const value = await rpcCall(endpoint, payload);
-    return value;
+    const response = await rpcCall(endpoint, payload);
+    if (response && typeof response === 'object' && 'ok' in response) {
+      if (response.ok === false) {
+        throw new Error(response.error?.message ?? '请求失败');
+      }
+      return response.value;
+    }
+    return response;
   }, [rpcCall]);
 
   const load = React.useCallback(async () => {

@@ -82,7 +82,7 @@ export function createTokenChannelSettings(definition) {
     accountSettingsEndpoint = null,
   } = definition;
 
-  function AccountCard({ account, busy, testNotice, removing, onReconnect, onWorkspaceSave, onAliasSave, onModelSave, onAgentPresetSave, onContextEnhancementSave, onAccountSettingsSave, onRequestRemove, onConfirmRemove, onCancelRemove }) {
+  function AccountCard({ account, busy, testNotice, removing, onReconnect, onWorkspaceSave, onAliasSave, onModelSave, onAgentPresetSave, onContextEnhancementSave, onAccountSettingsSave, onRequestRemove, onConfirmRemove, onCancelRemove, rpcCall, reload }) {
     const state = busy === 'reconnect' ? 'connecting' : account.state;
     const tone = account.connected ? 'success' : state === 'error' ? 'error' : 'warning';
     const stateLabel = account.connected ? '运行正常' : state === 'connecting' ? '正在连接' : '连接未就绪';
@@ -148,7 +148,7 @@ export function createTokenChannelSettings(definition) {
           // their own endpoints through the same RPC bridge.
           rpcCall,
           endpoints,
-          onChanged: loadStatus,
+          onChanged: reload,
         }) : null,
         h('div', { className: 'ddt-accountFooter dim-cardFooter' },
           h('div', { className: 'dim-cardFooterLayout' },
@@ -336,6 +336,8 @@ export function createTokenChannelSettings(definition) {
           h('ul', { className: 'ddt-list dim-botList' }, model.bots.map((account) =>
             h('li', { key: account.botId }, h(AccountCard, {
               account,
+              rpcCall,
+              reload: loadStatus,
               busy: busyByBot[account.botId],
               testNotice: testNoticeByBot[account.botId],
               removing: removeTarget === account.botId,

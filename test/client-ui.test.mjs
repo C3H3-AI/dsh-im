@@ -1586,3 +1586,91 @@ test('the Email settings form forwards every mailbox field to the bind RPC', asy
     'the mailbox form payload must pass through unchanged',
   );
 });
+
+test('the Email account card renders its settings panel without crashing', async () => {
+  // Regression guard: the panel was handed a `rpcCall` that was not in scope,
+  // so React threw "rpcCall is not defined" and the whole IM settings slot
+  // failed to render. Rendering the card here reproduces that path.
+  const { EmailAccountCard } = await import('../plugin-src/client/channels/email/index.js');
+  const rpcCall = async () => ({ ok: true, value: { sessions: [], knownSenders: [] } });
+  const markup = renderToStaticMarkup(React.createElement(EmailAccountCard, {
+    account: {
+      botId: 'email-account-card',
+      state: 'connected',
+      connected: true,
+      bot: { name: 'user@qq.com', idMasked: 'us****@qq.com' },
+      allowedSenders: ['boss@example.com'],
+      health: { summary: '邮箱通道运行正常' },
+    },
+    rpcCall,
+    onReconnect() {},
+    onRequestRemove() {},
+    onConfirmRemove() {},
+    onCancelRemove() {},
+  }));
+  assert.match(markup, /class="ddt-card dim-botCard"/);
+
+  // Static markup does not run effects, so the panel is mounted through the
+  // interactive renderer as well — that is where the missing scope actually
+  // threw and took the whole settings slot down with it.
+  const calls = [];
+  const interactiveRpc = async (endpoint) => {
+    calls.push(endpoint);
+    if (endpoint === 'bot.session-binding.get') {
+      return { ok: true, value: { account: 'session-1', senders: {}, knownSenders: ['boss@example.com'] } };
+    }
+    if (endpoint === 'bot.session.list') {
+      return { ok: true, value: { workspace: '/tmp', sessions: [{ sessionId: 'session-1', title: 'T1' }] } };
+    }
+    return { ok: true, value: {} };
+  };
+  // React reports a render failure through console.error instead of rethrowing
+  // under the test renderer, so the errors are captured explicitly — otherwise
+  // a broken panel renders as "nothing happened".
+  const renderErrors = [];
+  const originalError = console.error;
+  console.error = (...args) => {
+    renderErrors.push(args.map((a) => (a instanceof Error ? a.message : String(a))).join(' '));
+  };
+  let renderer;
+  await TestRenderer.act(async () => {
+    renderer = TestRenderer.create(React.createElement(EmailAccountCard, {
+      account: {
+        botId: 'email-account-card', state: 'connected', connected: true,
+        bot: { name: 'user@qq.com', idMasked: 'us****@qq.com' },
+        allowedSenders: ['boss@example.com'], health: { summary: '邮箱通道运行正常' },
+      },
+      rpcCall: interactiveRpc,
+      onReconnect() {}, onRequestRemove() {}, onConfirmRemove() {}, onCancelRemove() {},
+    }));
+  });
+  assert.ok(renderer, 'the account card must mount without throwing');
+
+  // Expand the account section: the settings panel mounts only when open, and
+  // that was the path that actually crashed.
+  for (const clickable of renderer.root.findAll(
+    (node) => typeof node.props?.onClick === 'function',
+  )) {
+    try {
+      await TestRenderer.act(async () => {
+        clickable.props.onClick({ stopPropagation() {}, preventDefault() {}, key: '' });
+      });
+    } catch { /* unrelated controls */ }
+  }
+  const buttonLabels = renderer.root
+    .findAll((node) => node.type === 'button')
+    .map((button) => (button.children ?? []).filter((c) => typeof c === 'string').join(''));
+  assert.ok(
+    buttonLabels.includes('保存绑定'),
+    'the session binding panel must mount once the account section is open',
+  );
+  assert.ok(buttonLabels.includes('清除绑定'));
+  assert.ok(
+    calls.includes('bot.session-binding.get') && calls.includes('bot.session.list'),
+    'the panel must load bindings and the session list',
+  );
+  renderer.unmount();
+  console.error = originalError;
+  const componentErrors = renderErrors.filter((line) => /is not defined|ReferenceError|Cannot read/.test(line));
+  assert.deepEqual(componentErrors, [], 'the settings panel must render without component errors');
+});
