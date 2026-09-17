@@ -273,8 +273,10 @@ export class EmailRuntime {
   constructor({
     config, token, harness, state, contextEnhancement, accessPolicy, logger = console,
     replyTimeoutMs = 600_000, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
+    // The caller supplies a transport chosen from the mailbox's config; the
+    // default exists for direct construction (tests) and assumes IMAP/SMTP.
     createApi = (options) => new EmailApi(options),
-    credential = null, onTokensRefreshed = null,
+    credential = null, onTokensRefreshed = null, createTransport = null,
   }) {
     if (!config || !token || !harness || !state) {
       throw new TypeError('EmailRuntime requires config, token, Harness, and state');
@@ -288,7 +290,8 @@ export class EmailRuntime {
     this.#logger = logger;
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#pollIntervalMs = pollIntervalMs;
-    this.#createApi = createApi;
+    // A caller-supplied transport wins; it is what knows the mailbox's protocol.
+    this.#createApi = typeof createTransport === 'function' ? createTransport : createApi;
     this.#credential = credential ?? null;
     this.#onTokensRefreshed = typeof onTokensRefreshed === 'function' ? onTokensRefreshed : null;
   }

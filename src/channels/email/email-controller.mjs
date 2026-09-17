@@ -563,6 +563,10 @@ export class EmailController {
       // a password.
       token: credential.password ?? credential.accessToken,
       credential,
+      // The runtime must build the transport the mailbox is configured for.
+      // Its own default is IMAP/SMTP, so without this an Agent mailbox was
+      // dialled as a mail server and failed with ECONNREFUSED on port 993.
+      createTransport: (options) => this.#createTransport(options.config ?? options),
     });
     if (!runtime || typeof runtime.start !== 'function' || typeof runtime.stop !== 'function') {
       throw new TypeError('createRuntime returned an invalid Email runtime');

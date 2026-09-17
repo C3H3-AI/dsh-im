@@ -1369,3 +1369,77 @@ test('the runtime hands its transport key to the transport factory', async () =>
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+test('the runtime uses the transport its caller supplies', async () => {
+  // The runtime defaulted to IMAP/SMTP regardless of the mailbox's protocol,
+  // so an Agent mailbox was dialled as a mail server and failed on port 993
+  // with ECONNREFUSED while its own API worked fine.
+  const { EmailRuntime } = await import('../../../src/channels/email/email-runtime.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-inject-'));
+  try {
+    const state = await new EmailStateStore(join(dir, 'state.json')).load();
+    const built = [];
+    const stub = () => ({
+      connect: async () => {}, disconnect: async () => {}, latestUid: async () => 0,
+      listMessages: async () => [], sendReply: async () => {}, sendText: async () => {},
+    });
+    const runtime = new EmailRuntime({
+      config: { platformId: 'bot@agent.qq.com', transport: 'agent-mail', allowedSenders: [] },
+      token: 'unused',
+      credential: { address: 'bot@agent.qq.com', accessToken: 'AT' },
+      harness: { ensureRunning: async () => {} },
+      state,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      // What the controller injects.
+      createTransport: (options) => { built.push(options.transport ?? options.config?.transport); return stub(); },
+    });
+    await runtime.start();
+    assert.deepEqual(built, ['agent-mail'], 'the supplied factory builds the configured transport');
+    await runtime.stop();
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('the controller tells the runtime which transport to build', async () => {
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-inject2-'));
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    await store.save({
+      platformId: 'bot@agent.qq.com', transport: 'agent-mail',
+      allowedSenders: ['boss@example.com'],
+    });
+    let factory = null;
+    let built = null;
+    const stub = () => ({
+      connect: async () => {}, disconnect: async () => {}, latestUid: async () => 0,
+      listMessages: async () => [], sendReply: async () => {}, sendText: async () => {},
+    });
+    const controller = new EmailController({
+      credentials: {
+        async resolve() {
+          return { value: JSON.stringify({ address: 'bot@agent.qq.com', accessToken: 'AT' }) };
+        },
+        async set() {}, async unset() {},
+      },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: {
+        'imap-smtp': stub,
+        'agent-mail': (options) => { built = options.config.transport; return stub(); },
+      },
+      // Stand in for the runtime: capture what the controller injects.
+      createRuntime: async ({ createTransport }) => {
+        factory = createTransport;
+        return { start: async () => {}, stop: async () => {}, status: {} };
+      },
+    });
+    await controller.initialize();
+    assert.equal(typeof factory, 'function', 'a transport factory is injected');
+    factory({ config: { transport: 'agent-mail' } });
+    assert.equal(built, 'agent-mail', 'the injected factory honours the mailbox protocol');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});

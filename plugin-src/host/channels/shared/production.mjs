@@ -140,7 +140,7 @@ export async function createTokenProductionController(ctx, config, internals, de
       botWorkspaceFor: (botId) => workspaces.workspaceFor(botId),
       defaultWorkspace,
     } : {}),
-    createRuntime: async ({ botId, config: botConfig, token, credential }) => {
+    createRuntime: async ({ botId, config: botConfig, token, credential, createTransport }) => {
       const state = await stateFor(botId);
       await workspaces.ensure(botId, {
         defaultAgentPreset: config.agentPreset,
@@ -162,6 +162,9 @@ export async function createTokenProductionController(ctx, config, internals, de
         ...(credential ? { credential } : {}),
         // A transport that rotates its tokens needs them written back.
         ...(persistTokens ? { onTokensRefreshed: persistTokens } : {}),
+        // The channel decides which transport a mailbox uses; without this the
+        // runtime falls back to its own IMAP/SMTP default.
+        ...(typeof createTransport === 'function' ? { createTransport } : {}),
         harness: workspaceScope.harness,
         state: workspaceScope.state,
         contextEnhancement: { botId, getSettings: () => workspaces.contextEnhancementFor(botId) },
