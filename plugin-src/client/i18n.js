@@ -1043,6 +1043,7 @@ const EN = Object.freeze({
   '尚无可覆盖的发件人（先在上方配置允许的发件人）。': 'No senders to override yet (configure allowed senders above first).',
   '保存绑定': 'Save binding',
   '清除绑定': 'Clear binding',
+  '所有发件人同上': 'Point every sender at the same session',
   '请求失败': 'The request failed',
 });
 

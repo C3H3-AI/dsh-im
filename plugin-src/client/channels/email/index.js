@@ -220,7 +220,14 @@ function SessionBindingPanel({ account, rpcCall, endpoints, onChanged, disabled 
                 next[index] = { ...row, sessionId: event.target.value };
                 setSenderRows(next);
               },
-            }, options(row.sessionId, '跟随账号级')))))
+            }, options(row.sessionId, '跟随账号级')))),
+          // Several senders often belong together; one click points them all at
+          // the same session instead of repeating the choice per row.
+          h('div', { className: 'ddt-actions dim-viewActions' },
+            h('button', {
+              type: 'button', className: 'ddt-button', disabled: locked || !accountSession,
+              onClick: () => setSenderRows(senderRows.map((row) => ({ ...row, sessionId: accountSession }))),
+            }, '所有发件人同上')))
         : h('p', { className: 'dim-emailHint' }, '尚无可覆盖的发件人（先在上方配置允许的发件人）。')),
     error ? h('p', { className: 'dim-inlineError', role: 'alert' }, error.message ?? String(error)) : null,
     notice ? h('p', { className: 'dim-emailHint', role: 'status' }, notice) : null,

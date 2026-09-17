@@ -11,7 +11,32 @@ export const EMAIL_ENDPOINTS = Object.freeze({
   setBinding: 'bot.session-binding.set',
   listSessions: 'bot.session.list',
 });
-const api = createTokenChannelApi('Email', ' IMAP/SMTP 邮箱');
+/**
+ * Carry the channel-specific mailbox fields through the shared snapshot
+ * normalizer, which keeps an explicit field list and would otherwise drop
+ * them — the settings form then showed an empty allowlist even though the
+ * Host was returning it.
+ */
+function normalizeEmailBotExtension(value) {
+  const senders = Array.isArray(value?.allowedSenders) ? value.allowedSenders : [];
+  return {
+    allowedSenders: senders.filter((entry) => typeof entry === 'string' && entry),
+    ...(typeof value?.provider === 'string' && value.provider
+      ? { provider: value.provider } : {}),
+    ...(text(value?.imapHost) ? { imapHost: text(value.imapHost) } : {}),
+    ...(Number.isSafeInteger(value?.imapPort) ? { imapPort: value.imapPort } : {}),
+    ...(text(value?.smtpHost) ? { smtpHost: text(value.smtpHost) } : {}),
+    ...(Number.isSafeInteger(value?.smtpPort) ? { smtpPort: value.smtpPort } : {}),
+  };
+}
+
+function text(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+const api = createTokenChannelApi('Email', ' IMAP/SMTP 邮箱', {
+  normalizeBotExtension: normalizeEmailBotExtension,
+});
 export { api as emailClientApi };
 export const unwrapRpcResult = api.unwrapRpcResult;
 export const normalizeSnapshot = api.normalizeSnapshot;

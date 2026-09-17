@@ -428,3 +428,37 @@ test('the model sees the subject and the recipient lists', async () => {
   assert.match(message.content, /^Cc: 团队 <team@corp\.com>$/m);
   assert.match(message.content, /统计上个月的数据/);
 });
+
+test('several senders can be pinned to the same session', async () => {
+  const state = new EmailStateStore(join(tmpdir(), 'unused-email-multi.json'));
+  await state.setEmailBindings({
+    account: null,
+    senders: { 'a@x.com': 'session-SHARED', 'b@x.com': 'session-SHARED' },
+  });
+  assert.equal(state.boundSessionFor('a@x.com'), 'session-SHARED');
+  assert.equal(state.boundSessionFor('b@x.com'), 'session-SHARED');
+  // A different sender still starts its own thread.
+  assert.equal(state.boundSessionFor('c@x.com'), null);
+});
+
+test('the mailbox fields survive the client snapshot normalizer', async () => {
+  // The shared normalizer keeps an explicit field list, so a channel-specific
+  // field is dropped unless the channel declares it — the settings form then
+  // showed an empty allowlist even though the Host returned it.
+  const { normalizeSnapshot } = await import('../../../plugin-src/client/channels/email/api.js');
+  const snapshot = normalizeSnapshot({
+    revision: 1,
+    bots: [{
+      botId: 'email_x', connected: true, state: 'connected',
+      allowedSenders: ['a@x.com', 'b@y.com'],
+      provider: 'qq', imapHost: 'imap.qq.com', imapPort: 993,
+      smtpHost: 'smtp.qq.com', smtpPort: 587,
+      bot: { name: 'u@qq.com' }, health: { summary: 'ok' },
+    }],
+  });
+  const bot = snapshot.bots[0];
+  assert.deepEqual(bot.allowedSenders, ['a@x.com', 'b@y.com']);
+  assert.equal(bot.imapPort, 993);
+  assert.equal(bot.smtpPort, 587);
+  assert.equal(bot.provider, 'qq');
+});
