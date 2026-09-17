@@ -1335,3 +1335,37 @@ test('a failed startup reports a usable reason', async () => {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+test('the runtime hands its transport key to the transport factory', async () => {
+  // The runtime built the transport config without the transport key, so every
+  // mailbox was dialled as IMAP/SMTP — an Agent mailbox then failed with
+  // ECONNREFUSED because it was addressed as a mail server.
+  const { EmailRuntime } = await import('../../../src/channels/email/email-runtime.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-transportkey-'));
+  try {
+    const state = await new EmailStateStore(join(dir, 'state.json')).load();
+    let received = null;
+    const runtime = new EmailRuntime({
+      config: { platformId: 'bot@agent.qq.com', transport: 'agent-mail', allowedSenders: [] },
+      token: 'unused',
+      credential: { address: 'bot@agent.qq.com', accessToken: 'AT' },
+      harness: { ensureRunning: async () => {} },
+      state,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      createApi: (options) => {
+        received = options.config;
+        return {
+          connect: async () => {}, disconnect: async () => {}, latestUid: async () => 0,
+          listMessages: async () => [], sendReply: async () => {}, sendText: async () => {},
+        };
+      },
+    });
+    await runtime.start();
+    assert.ok(received, 'the transport was constructed');
+    assert.equal(received.transport, 'agent-mail', 'the configured key reaches the factory');
+    assert.equal(received.accessToken, 'AT');
+    await runtime.stop();
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});

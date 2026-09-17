@@ -344,6 +344,10 @@ export class EmailRuntime {
       const api = this.#createApi({
         config: {
           address: this.#config.platformId,
+          // Which protocol to speak. Omitting it fell back to IMAP/SMTP, so an
+          // Agent mailbox was dialled as if it were a mail server and failed
+          // with ECONNREFUSED.
+          transport: this.#config.transport,
           // A standard mailbox authenticates with the app password; the Agent
           // mailbox has none and carries an OAuth pair instead.
           password: this.#token,
