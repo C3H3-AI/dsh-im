@@ -1927,3 +1927,60 @@ test('the bindable session list refreshes while the panel stays open', async () 
     'a session created while the panel was open appears');
   renderer.unmount();
 });
+
+test('saving the allowlist refreshes the per-sender rows', async () => {
+  // The allowlist decides which senders the binding panel offers. Saving it
+  // reloaded channel state but not that panel, so a newly allowed sender never
+  // appeared as a row — the value was stored and simply not shown.
+  const { EmailAccountCard } = await import('../plugin-src/client/channels/email/index.js');
+  const textOf = (node) => {
+    if (typeof node === 'string') return node;
+    if (Array.isArray(node)) return node.map(textOf).join('');
+    if (node?.children) return textOf(node.children);
+    return '';
+  };
+  let knownSenders = ['a@x.com'];
+  const calls = [];
+  const rpcCall = async (endpoint) => {
+    calls.push(endpoint);
+    if (endpoint === 'bot.session-binding.get') {
+      return { ok: true, value: { account: null, senders: {}, knownSenders: [...knownSenders] } };
+    }
+    if (endpoint === 'bot.session.list') {
+      return { ok: true, value: { workspace: '/tmp', sessions: [] } };
+    }
+    return { ok: true, value: {} };
+  };
+  let renderer;
+  await TestRenderer.act(async () => {
+    renderer = TestRenderer.create(React.createElement(EmailAccountCard, {
+      account: {
+        botId: 'e1', state: 'connected', connected: true,
+        bot: { name: 'me@agent.qq.com' }, allowedSenders: ['a@x.com'],
+        health: { summary: 'ok' },
+      },
+      rpcCall, onReconnect() {}, onRequestRemove() {}, onConfirmRemove() {}, onCancelRemove() {},
+    }));
+  });
+  const senderRows = () => renderer.root
+    .findAll((node) => String(node.props?.className ?? '').includes('dim-emailBindingSender'))
+    .map((node) => textOf(node.children));
+  assert.deepEqual(senderRows(), ['a@x.com']);
+
+  // A second address is allowed and the form is saved.
+  knownSenders = ['a@x.com', 'newboss@corp.com'];
+  const allowlist = renderer.root.findAll((node) => node.type === 'textarea')[0];
+  await TestRenderer.act(async () => {
+    allowlist.props.onChange({ target: { value: 'a@x.com\nnewboss@corp.com' } });
+  });
+  const save = renderer.root.findAll((node) => node.type === 'button')
+    .find((b) => textOf(b.children) === '保存');
+  await TestRenderer.act(async () => { await save.props.onClick(); });
+  await TestRenderer.act(async () => { await new Promise((r) => { setTimeout(r, 100); }); });
+
+  assert.ok(calls.filter((c) => c === 'bot.session-binding.get').length > 1,
+    'the binding panel is re-read when the allowlist changes');
+  assert.deepEqual(senderRows(), ['a@x.com', 'newboss@corp.com'],
+    'a newly allowed sender gets a row');
+  renderer.unmount();
+});

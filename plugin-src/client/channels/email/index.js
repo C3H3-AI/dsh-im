@@ -356,7 +356,9 @@ function sessionLabel(session) {
   return `${title.slice(0, 12)}…${title.slice(-8)}`;
 }
 
-function SessionBindingPanel({ account, rpcCall, endpoints, onChanged, disabled }) {
+function SessionBindingPanel({
+  account, rpcCall, endpoints, onChanged, disabled, registerReload = null,
+}) {
   const [binding, setBinding] = React.useState(null);
   const [sessions, setSessions] = React.useState([]);
   const [accountSession, setAccountSession] = React.useState('');
@@ -398,6 +400,12 @@ function SessionBindingPanel({ account, rpcCall, endpoints, onChanged, disabled 
   }, [account.botId, endpoints, invoke, rpcCall]);
 
   React.useEffect(() => { void load(); }, [load]);
+  // Let the allowlist form refresh this panel: the allowlist decides which
+  // senders get a row, and the parent's own reload only re-reads channel state.
+  React.useEffect(() => {
+    registerReload?.(load);
+    return () => registerReload?.(null);
+  }, [load, registerReload]);
 
   // Sessions are created elsewhere — chats, automations, other channels — so a
   // list fetched once when the panel opened goes stale while it stays open.
@@ -413,6 +421,9 @@ function SessionBindingPanel({ account, rpcCall, endpoints, onChanged, disabled 
         // A failed refresh keeps the list already on screen.
       }
     }, SESSION_REFRESH_MS);
+    // A background timer must not hold a process open (server-side render,
+    // tests, or a headless client).
+    refresh.unref?.();
     return () => { cancelled = true; clearInterval(refresh); };
   }, [account.botId, endpoints, invoke, rpcCall]);
 
@@ -532,6 +543,16 @@ function MailboxSettings({ account, busy, error, onSave, onCancel, rpcCall, endp
   const [allowedSenders, setAllowedSenders] = React.useState(
     (account?.allowedSenders ?? []).join('\n'),
   );
+  // The binding panel owns the sender rows; saving the allowlist must reload
+  // that panel, because the parent's own reload only re-reads channel state.
+  const bindingReload = React.useRef(null);
+  const saveAllowlist = async () => {
+    const senders = allowedSenders
+      .split(/[\s,;，；]+/).map((value) => value.trim()).filter(Boolean);
+    await onSave?.({ allowedSenders: senders });
+    await onChanged?.({ silent: true });
+    await bindingReload.current?.();
+  };
   return h('section', { className: 'dim-emailPanel' },
     h('div', { className: 'dim-emailFields' },
       field('允许的发件人', h('textarea', {
@@ -543,13 +564,11 @@ function MailboxSettings({ account, busy, error, onSave, onCancel, rpcCall, endp
       h('button', { type: 'button', className: 'ddt-button', onClick: onCancel, disabled: busy }, '取消'),
       h('button', {
         type: 'button', className: 'ddt-button', 'data-kind': 'primary', disabled: busy,
-        onClick: () => onSave({
-          allowedSenders: allowedSenders
-            .split(/[\s,;，；]+/).map((value) => value.trim()).filter(Boolean),
-        }),
+        onClick: () => { void saveAllowlist(); },
       }, busy ? '正在保存…' : '保存')),
     h(SessionBindingPanel, {
       account, rpcCall, endpoints, onChanged, disabled: busy,
+      registerReload: (reloadFn) => { bindingReload.current = reloadFn; },
     }));
 }
 
