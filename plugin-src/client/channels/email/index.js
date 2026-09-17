@@ -64,6 +64,9 @@ function waitingHint(session) {
   return ['等待授权中，', String(minutes), ' 分钟', '内有效，可保持本页打开。'];
 }
 
+/** How often the bindable session list is refreshed while the panel is open. */
+const SESSION_REFRESH_MS = 15_000;
+
 /**
  * QR authorization for the Agent mailbox.
  *
@@ -396,6 +399,23 @@ function SessionBindingPanel({ account, rpcCall, endpoints, onChanged, disabled 
 
   React.useEffect(() => { void load(); }, [load]);
 
+  // Sessions are created elsewhere — chats, automations, other channels — so a
+  // list fetched once when the panel opened goes stale while it stays open.
+  React.useEffect(() => {
+    if (typeof rpcCall !== 'function') return undefined;
+    let cancelled = false;
+    const refresh = setInterval(async () => {
+      try {
+        const listed = await invoke(endpoints.listSessions, { botId: account.botId });
+        if (cancelled) return;
+        setSessions(Array.isArray(listed?.sessions) ? listed.sessions : []);
+      } catch {
+        // A failed refresh keeps the list already on screen.
+      }
+    }, SESSION_REFRESH_MS);
+    return () => { cancelled = true; clearInterval(refresh); };
+  }, [account.botId, endpoints, invoke, rpcCall]);
+
   const persist = async (nextAccount, nextRows) => {
     setBusy(true);
     setError(null);
@@ -450,7 +470,13 @@ function SessionBindingPanel({ account, rpcCall, endpoints, onChanged, disabled 
   const locked = disabled || busy;
 
   return h('section', { className: 'dim-emailPanel dim-emailBinding' },
-    h('h4', null, '会话绑定'),
+    h('div', { className: 'dim-emailBindingHead' },
+      h('h4', null, '会话绑定'),
+      // The list also refreshes on a timer; this is for an immediate re-read.
+      h('button', {
+        type: 'button', className: 'ddt-button', disabled: locked,
+        onClick: () => { void load(); },
+      }, '刷新会话列表')),
     h('p', { className: 'dim-emailHint' },
       '不绑定则每封新邮件开启一个新会话；绑定固定会话后，来信都在该会话内继续。'),
     h('div', { className: 'dim-emailFields' },

@@ -1876,3 +1876,54 @@ test('a completed authorization connects without a second click', async () => {
   assert.deepEqual(submitted[0].allowedSenders, ['boss@corp.com']);
   renderer.unmount();
 });
+
+test('the bindable session list refreshes while the panel stays open', async () => {
+  // Sessions are created elsewhere, so a list fetched once when the panel
+  // opened goes stale: a conversation started a minute ago never appeared.
+  const { EmailAccountCard } = await import('../plugin-src/client/channels/email/index.js');
+  const listings = [];
+  let sessionList = [{ sessionId: 'session-1', title: 'First' }];
+  const rpcCall = async (endpoint) => {
+    if (endpoint === 'bot.session-binding.get') {
+      return { ok: true, value: { account: 'session-1', senders: {}, knownSenders: ['a@x.com'] } };
+    }
+    if (endpoint === 'bot.session.list') {
+      listings.push(sessionList.length);
+      return { ok: true, value: { workspace: '/tmp', sessions: sessionList } };
+    }
+    return { ok: true, value: {} };
+  };
+  let renderer;
+  await TestRenderer.act(async () => {
+    renderer = TestRenderer.create(React.createElement(EmailAccountCard, {
+      account: {
+        botId: 'e1', state: 'connected', connected: true,
+        bot: { name: 'me@agent.qq.com' }, allowedSenders: ['a@x.com'],
+        health: { summary: 'ok' },
+      },
+      rpcCall, onReconnect() {}, onRequestRemove() {}, onConfirmRemove() {}, onCancelRemove() {},
+    }));
+  });
+  const before = listings.length;
+
+  // A new conversation appears elsewhere while the panel is open.
+  await TestRenderer.act(async () => {
+    sessionList = [...sessionList, { sessionId: 'session-2', title: 'Second' }];
+  });
+  const optionsOf = () => renderer.root
+    .findAll((node) => node.type === 'option')
+    .map((option) => String(option.props.children ?? ''));
+  assert.ok(optionsOf().some((label) => label.includes('First')), 'the first session is listed');
+
+  // The refresh button re-reads immediately.
+  const refresh = renderer.root.findAll((node) => node.type === 'button')
+    .find((b) => (b.children ?? []).includes('刷新会话列表'));
+  assert.ok(refresh, 'a refresh control is offered');
+  await TestRenderer.act(async () => { refresh.props.onClick(); });
+  await TestRenderer.act(async () => { await new Promise((r) => { setTimeout(r, 50); }); });
+
+  assert.ok(listings.length > before, 'the list is re-read on demand');
+  assert.ok(optionsOf().some((label) => label.includes('Second')),
+    'a session created while the panel was open appears');
+  renderer.unmount();
+});

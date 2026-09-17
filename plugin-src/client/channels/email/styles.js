@@ -17,6 +17,7 @@ const CSS = String.raw`
 .dim-emailGrid { display: grid; grid-template-columns: 1fr 120px; gap: 12px; }
 .dim-emailBinding { margin-top: 20px; border-top: 1px solid var(--dsw-alias-border, #dee0e3); padding-top: 16px; }
 .dim-emailBinding h4 { margin: 0 0 4px; font-size: 14px; }
+.dim-emailBindingHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 /* The sender address wraps above its picker instead of squeezing the select
    into a narrow column, so a long session title stays fully readable. */
 .dim-emailBindingRow {
