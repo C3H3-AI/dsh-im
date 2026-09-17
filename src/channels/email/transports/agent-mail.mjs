@@ -185,6 +185,38 @@ export function normalizeAgentMailMessage(raw) {
   };
 }
 
+/**
+ * Resolve the mailbox identity behind a token pair.
+ *
+ * The authorization returns only tokens, but the address is what the mailbox is
+ * named and bound as — fetching it here keeps the user from typing something
+ * the server already knows.
+ */
+export async function fetchAgentMailIdentity({
+  accessToken, refreshToken = '', fetchImpl = fetch, signal,
+} = {}) {
+  const response = await request(fetchImpl, `${API_BASE}/v1/me`, {
+    token: accessToken, signal,
+  });
+  if (response.status >= 400) {
+    throw new AgentMailError(`/v1/me failed: HTTP ${response.status}`, {
+      code: 'identity-failed', status: response.status,
+    });
+  }
+  const aliases = Array.isArray(response.body?.data?.aliases)
+    ? response.body.data.aliases : [];
+  const primary = aliases.find((entry) => entry?.is_primary) ?? aliases[0];
+  const address = String(primary?.email ?? '').trim().toLowerCase();
+  if (!address) {
+    throw new AgentMailError('no email returned by /v1/me', { code: 'identity-missing' });
+  }
+  return {
+    address,
+    aliasId: String(primary?.alias_id ?? '').trim(),
+    name: String(primary?.name ?? '').trim(),
+  };
+}
+
 export class AgentMailTransport {
   #config;
   #signal;

@@ -200,7 +200,8 @@ function MailboxPanel({ busy, error, onSubmit, onCancel, rpcCall, endpoints }) {
   // `granted` lets the auto-submit path pass the tokens it just received,
   // since React state has not re-rendered with them yet.
   const submit = (granted = null) => onSubmit({
-    address: address.trim(),
+    // Prefer the typed address, but an Agent mailbox gets one from the server.
+    address: (address.trim() || granted?.address || ''),
     transport: transport.key,
     ...(transport.needsPassword ? { password } : {}),
     ...(isAgentMail && (granted ?? tokens) ? { ...(granted ?? tokens) } : {}),
@@ -217,7 +218,9 @@ function MailboxPanel({ busy, error, onSubmit, onCancel, rpcCall, endpoints }) {
 
   // Once an authorization lands, finish the job without a second click.
   React.useEffect(() => {
-    if (!autoBind || !address.trim() || busy) return;
+    if (!autoBind || busy) return;
+    // The address may have arrived with the authorization.
+    if (!address.trim() && !autoBind.address) return;
     const senders = allowedSenders.split(/[\s,;，；]+/).map((v) => v.trim()).filter(Boolean);
     // The allowlist is required; ask for it rather than failing the bind.
     if (senders.length === 0) return;
@@ -236,10 +239,17 @@ function MailboxPanel({ busy, error, onSubmit, onCancel, rpcCall, endpoints }) {
         disabled: busy,
       }, TRANSPORTS.map((entry) => h('option', { key: entry.key, value: entry.key }, entry.label))),
       h('span', { className: 'dim-emailHint' }, transport.hint)),
-      field('邮箱地址', h('input', {
-        type: 'email', value: address, placeholder: 'your-name@qq.com', disabled: busy,
-        onChange: (event) => setAddress(event.target.value),
-      })),
+      field('邮箱地址',
+        h('input', {
+          type: 'email', value: address, disabled: busy,
+          // The Agent mailbox address comes from the authorization, so it is
+          // filled in rather than typed.
+          ...(isAgentMail
+            ? { readOnly: true, placeholder: '授权后自动填入' }
+            : { placeholder: 'your-name@qq.com',
+              onChange: (event) => setAddress(event.target.value) }),
+        }),
+        isAgentMail ? '由授权结果自动填入，无需手工填写。' : null),
       transport.needsProvider ? field('邮箱服务商', h('select', {
         value: provider,
         onChange: (event) => setProvider(event.target.value),
@@ -276,8 +286,13 @@ function MailboxPanel({ busy, error, onSubmit, onCancel, rpcCall, endpoints }) {
           // Auto-submit: the panel says "connecting", so it must actually
           // connect. Requiring a second click stranded users who had already
           // scanned, and a reload lost the token entirely.
-          onAuthorized: (granted) => { setTokens(granted); setAutoBind(granted); },
-          blocked: !address.trim()
+          onAuthorized: (granted) => {
+            // The server resolves the address, so the field fills itself.
+            if (granted?.address) setAddress(granted.address);
+            setTokens(granted);
+            setAutoBind(granted);
+          },
+          blocked: (!address.trim() && !tokens?.address)
             || allowedSenders.split(/[\s,;，；]+/).every((value) => !value.trim()),
           onError: () => setTokens(null),
         })

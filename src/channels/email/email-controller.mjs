@@ -7,6 +7,7 @@ import { assertTransport } from './transport.mjs';
 import { ImapSmtpTransport } from './transports/imap-smtp.mjs';
 import {
   AgentMailTransport,
+  fetchAgentMailIdentity,
   pollAgentMailDeviceFlow,
   startAgentMailDeviceFlow,
 } from './transports/agent-mail.mjs';
@@ -640,11 +641,21 @@ export class EmailController {
     }
     this.#pendingAuth = null;
     await this.#storePendingAuth(null);
+    // The scan yields tokens only, but the mailbox address is what the account
+    // is named and bound as, and the server already knows it — so it is looked
+    // up here instead of asking the user to type it.
+    let identity = null;
+    try {
+      identity = await fetchAgentMailIdentity({ accessToken: result.tokens.accessToken });
+    } catch (error) {
+      this.#logger.warn?.('[dsh-im:email] unable to resolve the mailbox identity:', error);
+    }
     return {
       status: 'authorized',
       authorized: true,
       accessToken: result.tokens.accessToken,
       refreshToken: result.tokens.refreshToken,
+      ...(identity ? { address: identity.address, name: identity.name } : {}),
     };
   }
 

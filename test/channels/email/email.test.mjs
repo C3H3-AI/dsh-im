@@ -1038,6 +1038,10 @@ test('a pending authorization survives a restart', async () => {
           input_code: 'ic_1', expires_in: 600,
         });
       }
+      // The identity lookup is not a poll.
+      if (String(url).includes('/v1/me')) {
+        return reply({ data: { aliases: [{ alias_id: 'A1', email: 'bot@agent.qq.com', is_primary: true }] } });
+      }
       polls += 1;
       // The user completed the scan while the plugin was restarting.
       return reply({ status: 'authorized', access_token: 'AT', refresh_token: 'RT' });
@@ -1440,6 +1444,91 @@ test('the controller tells the runtime which transport to build', async () => {
     factory({ config: { transport: 'agent-mail' } });
     assert.equal(built, 'agent-mail', 'the injected factory honours the mailbox protocol');
   } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('the agent mailbox authorization reports the mailbox address', async () => {
+  // The scan yields tokens only, but the address is what the account is named
+  // and bound as. It is fetched instead of asking the user to type what the
+  // server already knows.
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-addr-'));
+  const originalFetch = globalThis.fetch;
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    globalThis.fetch = async (url) => {
+      const reply = (data) => ({
+        ok: true, status: 200, text: async () => JSON.stringify(data), json: async () => data,
+      });
+      if (String(url).includes('/oauth/device')) {
+        return reply({
+          poll_url: 'https://auth.agent.qq.com/poll/x',
+          browser_url: 'https://agent.qq.com/authorize?code=1',
+          input_code: 'ic_1', expires_in: 600,
+        });
+      }
+      if (String(url).includes('/v1/me')) {
+        return reply({ data: { aliases: [
+          { alias_id: 'A1', email: 'me@agent.qq.com', name: 'dshagent', is_primary: true },
+        ] } });
+      }
+      return reply({ status: 'authorized', access_token: 'AT', refresh_token: 'RT' });
+    };
+    const controller = new EmailController({
+      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+    });
+    await controller.startAuthorization({ transport: 'agent-mail' });
+    const done = await controller.pollAuthorization();
+    assert.equal(done.authorized, true);
+    assert.equal(done.address, 'me@agent.qq.com', 'the address travels with the tokens');
+    assert.equal(done.name, 'dshagent');
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('a mailbox whose identity cannot be read still authorizes', async () => {
+  // The lookup is a convenience; failing it must not invalidate a scan the user
+  // already completed.
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-addr2-'));
+  const originalFetch = globalThis.fetch;
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    globalThis.fetch = async (url) => {
+      const reply = (data, status = 200) => ({
+        ok: status < 400, status, text: async () => JSON.stringify(data), json: async () => data,
+      });
+      if (String(url).includes('/oauth/device')) {
+        return reply({
+          poll_url: 'https://auth.agent.qq.com/poll/y',
+          browser_url: 'https://agent.qq.com/authorize?code=2',
+          input_code: 'ic_2', expires_in: 600,
+        });
+      }
+      if (String(url).includes('/v1/me')) return reply({ error: 'nope' }, 500);
+      return reply({ status: 'authorized', access_token: 'AT', refresh_token: 'RT' });
+    };
+    const controller = new EmailController({
+      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+    });
+    await controller.startAuthorization({ transport: 'agent-mail' });
+    const done = await controller.pollAuthorization();
+    assert.equal(done.authorized, true, 'the authorization still succeeds');
+    assert.equal(done.accessToken, 'AT');
+    assert.equal(done.address, undefined, 'no address is reported when it cannot be read');
+  } finally {
+    globalThis.fetch = originalFetch;
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
