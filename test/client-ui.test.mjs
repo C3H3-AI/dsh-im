@@ -1817,7 +1817,7 @@ test('a completed authorization connects without a second click', async () => {
     if (endpoint === 'bot.auth.poll') {
       // The server resolves the address, which the panel fills in itself.
       return { ok: true, value: {
-        authorized: true, accessToken: 'AT', refreshToken: 'RT',
+        authorized: true,
         address: 'bot@agent.qq.com',
       } };
     }
@@ -1872,7 +1872,9 @@ test('a completed authorization connects without a second click', async () => {
   assert.equal(submitted.length, 1, 'the authorization submits the bind on its own');
   assert.equal(submitted[0].transport, 'agent-mail');
   assert.equal(submitted[0].address, 'bot@agent.qq.com');
-  assert.equal(submitted[0].accessToken, 'AT');
+  // agently-cli keeps the credentials, so no token travels through the bind.
+  assert.equal(submitted[0].accessToken, undefined);
+  assert.equal(submitted[0].address, 'bot@agent.qq.com');
   assert.deepEqual(submitted[0].allowedSenders, ['boss@corp.com']);
   renderer.unmount();
 });

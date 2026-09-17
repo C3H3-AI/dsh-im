@@ -7,9 +7,9 @@ import { assertTransport } from './transport.mjs';
 import { ImapSmtpTransport } from './transports/imap-smtp.mjs';
 import {
   AgentMailTransport,
+  agentMailAuthorizationStatus,
   fetchAgentMailIdentity,
-  pollAgentMailDeviceFlow,
-  startAgentMailDeviceFlow,
+  startAgentMailAuthorization,
 } from './transports/agent-mail.mjs';
 import {
   DEFAULT_EMAIL_TRANSPORT,
@@ -164,16 +164,14 @@ export class EmailController {
     // Only the IMAP/SMTP transport needs a password; others authorize another
     // way (the Agent mailbox does so by QR code).
     const needsPassword = definition.fields.includes('password');
-    // A standard mailbox carries an app password; the Agent mailbox carries the
-    // OAuth pair the scan produced. Dropping the pair here made the credential
-    // probe run without a token and fail as if the password were wrong.
+    // A standard mailbox carries an app password. The Agent mailbox carries
+    // nothing: agently-cli keeps its own credentials in the system keychain, so
+    // only the address is stored here (to name and bind the mailbox).
     const credential = needsPassword
       ? normalizeCredential({ address: normalizedAddress, password })
-      : normalizeCredential({ address: normalizedAddress, accessToken, refreshToken });
-    if (!credential) {
-      throw new TypeError(needsPassword
-        ? t('邮箱地址与应用密码均为必填')
-        : t('授权信息缺失，请重新扫码授权'));
+      : Object.freeze({ address: normalizedAddress });
+    if (needsPassword && !credential) {
+      throw new TypeError(t('邮箱地址与应用密码均为必填'));
     }
     // Server hosts only apply to transports that speak a mail protocol.
     const needsHosts = definition.fields.includes('hosts');
@@ -543,14 +541,23 @@ export class EmailController {
   async #resolveSecrets(config) {
     const result = await this.#credentials.resolve(config.tokenRef).catch(() => undefined);
     const stored = result?.value;
-    if (typeof stored !== 'string' || !stored) return null;
-    try {
-      // The mailbox secret is stored as JSON so one ref carries the address
-      // and the app password together.
-      return normalizeCredential(JSON.parse(stored));
-    } catch {
-      return null;
+    if (typeof stored === 'string' && stored) {
+      try {
+        // The mailbox secret is stored as JSON so one ref carries the address
+        // and the app password together.
+        const parsed = normalizeCredential(JSON.parse(stored));
+        if (parsed) return parsed;
+      } catch {
+        // Fall through to the transport-specific default below.
+      }
     }
+    // The Agent mailbox needs no secret of ours: agently-cli keeps its own
+    // credentials in the system keychain. Returning null here used to skip the
+    // mailbox entirely, so it silently never started.
+    if (normalizeEmailTransport(config.transport) === 'agent-mail') {
+      return Object.freeze({ address: config.platformId });
+    }
+    return null;
   }
 
   async #startRuntime(config, credential) {
@@ -601,11 +608,12 @@ export class EmailController {
     if (key !== 'agent-mail') {
       throw new TypeError(t('该接入方式不需要扫码授权'));
     }
-    const device = await startAgentMailDeviceFlow({ hostname });
-    // The server states the validity window; a hard-coded one silently
-    // abandoned authorizations (and reported a shorter window in the UI).
+    // The official CLI owns the Agent mailbox protocol, including the token
+    // refresh: a hand-written client was refused one (invalid_grant), so the
+    // mailbox died an hour after every authorization.
+    const device = await startAgentMailAuthorization({});
     const expiresAt = Date.now() + (device.expiresInMs ?? AGENT_MAIL_AUTH_TTL_MS);
-    const pending = { transport: key, pollUrl: device.pollUrl, startedAt: Date.now(), expiresAt };
+    const pending = { transport: key, startedAt: Date.now(), expiresAt };
     this.#pendingAuth = pending;
     // Persisted too: the code outlives a reload, and losing it would strand an
     // authorization the user already completed.
@@ -622,8 +630,10 @@ export class EmailController {
   }
 
   /**
-   * Check a pending authorization once. On success the tokens are returned so
-   * the caller can bind the mailbox without ever seeing a password.
+   * Check a pending authorization once.
+   *
+   * The CLI stores the credentials itself, so nothing is returned to bind —
+   * only the address, which the panel shows and names the mailbox after.
    */
   async pollAuthorization() {
     // The in-memory copy is authoritative; the stored one survives a restart so
@@ -635,26 +645,23 @@ export class EmailController {
       await this.#storePendingAuth(null);
       throw new TypeError(t('扫码授权已超时，请重新发起'));
     }
-    const result = await pollAgentMailDeviceFlow({ pollUrl: pending.pollUrl });
-    if (result.status !== 'authorized' || !result.tokens) {
-      return { status: result.status, authorized: false };
+    const status = await agentMailAuthorizationStatus({});
+    if (!status.loggedIn) {
+      return { status: status.status || 'pending', authorized: false };
     }
     this.#pendingAuth = null;
     await this.#storePendingAuth(null);
-    // The scan yields tokens only, but the mailbox address is what the account
-    // is named and bound as, and the server already knows it — so it is looked
-    // up here instead of asking the user to type it.
+    // The mailbox address is what the account is named and bound as, and the
+    // server already knows it — so it is read here rather than typed.
     let identity = null;
     try {
-      identity = await fetchAgentMailIdentity({ accessToken: result.tokens.accessToken });
+      identity = await fetchAgentMailIdentity({});
     } catch (error) {
       this.#logger.warn?.('[dsh-im:email] unable to resolve the mailbox identity:', error);
     }
     return {
       status: 'authorized',
       authorized: true,
-      accessToken: result.tokens.accessToken,
-      refreshToken: result.tokens.refreshToken,
       ...(identity ? { address: identity.address, name: identity.name } : {}),
     };
   }

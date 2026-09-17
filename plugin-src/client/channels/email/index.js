@@ -114,8 +114,8 @@ function AgentMailAuth({ rpcCall, endpoints, disabled, onAuthorized, onError, bl
           setStatus('authorized');
           onAuthorized?.({
             transport: 'agent-mail',
-            accessToken: result.accessToken,
-            refreshToken: result.refreshToken,
+            // agently-cli keeps the credentials in the system keychain, so no
+            // token passes through here — only the address to bind.
             // The server resolves the mailbox address; carry it through or the
             // field stays empty and the bind has nothing to use.
             ...(result.address ? { address: result.address } : {}),

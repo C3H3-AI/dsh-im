@@ -181,5 +181,8 @@
     "doc": "docs",
     "lib": "lib",
     "test": "test"
+  },
+  "optionalDependencies": {
+    "@tencent-qqmail/agently-cli": "^1.0.18"
   }
 }

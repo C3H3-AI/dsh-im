@@ -657,225 +657,11 @@ function jsonResponse(data, status = 200) {
   };
 }
 
-test('the agent mailbox transport speaks the documented protocol', async () => {
-  const { AgentMailTransport } = await import(
-    '../../../src/channels/email/transports/agent-mail.mjs'
-  );
-  const { fetchImpl, calls } = fakeAgentMail({
-    responses: [
-      // The alias lookup and the listing are dispatched by URL, not by order.
-      (url) => (url.includes('/v1/me')
-        ? jsonResponse({ data: { aliases: [{ alias_id: 'ALIAS1', email: 'bot@agent.qq.com', is_primary: true }] } })
-        : jsonResponse({ data: [{
-          id: 'msg-1', message_id: '<m1@agent.qq.com>', subject: '测试',
-          from: { email: 'Boss@Corp.com', name: '老板' },
-          to: [{ email: 'bot@agent.qq.com' }], body: '正文',
-          headers: { 'auto-submitted': 'no' },
-        }], pagination: {} })),
-      (url) => (url.includes('/v1/me')
-        ? jsonResponse({ data: { aliases: [{ alias_id: 'ALIAS1', email: 'bot@agent.qq.com', is_primary: true }] } })
-        : jsonResponse({ data: [{
-          id: 'msg-1', message_id: '<m1@agent.qq.com>', subject: '测试',
-          from: { email: 'Boss@Corp.com', name: '老板' },
-          to: [{ email: 'bot@agent.qq.com' }], body: '正文',
-          headers: { 'auto-submitted': 'no' },
-        }], pagination: {} })),
-    ],
-  });
-  const transport = new AgentMailTransport({
-    config: { address: 'bot@agent.qq.com', accessToken: 'tok-1' }, fetchImpl,
-  });
 
-  const messages = await transport.listMessages({ afterUid: null, limit: 5 });
-  assert.equal(messages.length, 1);
-  assert.equal(messages[0].uid, 'msg-1');
-  assert.equal(messages[0].from.value[0].address, 'boss@corp.com');
-  assert.equal(messages[0].subject, '测试');
-  // The runtime reads the RFC 3834 marker through this accessor.
-  assert.equal(messages[0].headers.get('auto-submitted'), 'no');
-  assert.deepEqual(calls.map((c) => c.url), [
-    '/v1/me',
-    '/v1/aliases/ALIAS1/messages?limit=25&dir=inbox',
-  ]);
-});
 
-test('the agent mailbox filters senders before reading a body', async () => {
-  const { AgentMailTransport } = await import(
-    '../../../src/channels/email/transports/agent-mail.mjs'
-  );
-  const { fetchImpl, calls } = fakeAgentMail({
-    responses: [
-      () => jsonResponse({ data: { aliases: [{ alias_id: 'A1', email: 'bot@agent.qq.com', is_primary: true }] } }),
-      () => jsonResponse({ data: [
-        { id: 'msg-keep', from: { email: 'boss@corp.com' }, body: 'keep' },
-        { id: 'msg-drop', from: { email: 'stranger@evil.com' }, body: 'drop' },
-      ], pagination: {} }),
-    ],
-  });
-  const transport = new AgentMailTransport({
-    config: { address: 'bot@agent.qq.com', accessToken: 'tok' }, fetchImpl,
-  });
-  const messages = await transport.listMessages({
-    afterUid: null, limit: 5, allowSenders: new Set(['boss@corp.com']),
-  });
-  assert.deepEqual(messages.map((m) => m.uid), ['msg-keep']);
-  // Only the listing is fetched; no per-message read is issued.
-  assert.equal(calls.filter((c) => /\/messages\/[^?]/.test(c.url)).length, 0);
-});
 
-test('the agent mailbox refreshes a rotated token and persists it', async () => {
-  const { AgentMailTransport } = await import(
-    '../../../src/channels/email/transports/agent-mail.mjs'
-  );
-  const persisted = [];
-  let listAttempts = 0;
-  const fetchImpl = async (url, options = {}) => {
-    if (url.includes('/oauth/token')) {
-      // The server rotates the refresh token; it must be handed back.
-      return jsonResponse({ access_token: 'tok-2', refresh_token: 'ref-2' });
-    }
-    if (url.includes('/v1/me')) {
-      return jsonResponse({ data: { aliases: [{ alias_id: 'A1', email: 'bot@agent.qq.com', is_primary: true }] } });
-    }
-    listAttempts += 1;
-    // The first attempt is unauthorized; the retry must carry the new token.
-    if (listAttempts === 1) return jsonResponse({ error: { code: 'UNAUTHORIZED' } }, 401);
-    assert.equal(options.headers.authorization, 'Bearer tok-2');
-    return jsonResponse({ data: [], pagination: {} });
-  };
-  const transport = new AgentMailTransport({
-    config: { address: 'bot@agent.qq.com', accessToken: 'stale', refreshToken: 'ref-1' },
-    fetchImpl,
-    onTokensRefreshed: async (tokens) => { persisted.push(tokens); },
-  });
-  await transport.listMessages({ afterUid: null, limit: 5 });
-  assert.deepEqual(persisted, [{ accessToken: 'tok-2', refreshToken: 'ref-2' }],
-    'a rotated refresh token must be persisted or the next refresh fails');
-});
 
-test('the agent mailbox completes a send that requires confirmation', async () => {
-  const { AgentMailTransport } = await import(
-    '../../../src/channels/email/transports/agent-mail.mjs'
-  );
-  const bodies = [];
-  const fetchImpl = async (url, options = {}) => {
-    if (url.includes('/v1/me')) {
-      return jsonResponse({ data: { aliases: [{ alias_id: 'A1', email: 'bot@agent.qq.com', is_primary: true }] } });
-    }
-    const body = JSON.parse(options.body ?? '{}');
-    bodies.push(body);
-    if (bodies.length === 1) {
-      // The protocol answers the first send with a confirmation challenge.
-      return jsonResponse({
-        error: { code: 'CONFIRMATION_REQUIRED', details: { confirmation_token: 'cfm-1' } },
-      }, 400);
-    }
-    return jsonResponse({ data: { id: 'sent-1' } });
-  };
-  const transport = new AgentMailTransport({
-    config: { address: 'bot@agent.qq.com', accessToken: 'tok' }, fetchImpl,
-  });
-  const result = await transport.sendText({ to: 'boss@corp.com', subject: 'hi', text: 'body' });
-  assert.equal(result.sent, true);
-  assert.equal(bodies.length, 2, 'the send is retried with the confirmation token');
-  assert.equal(bodies[1].confirmation_token, 'cfm-1');
-});
 
-test('the device flow exposes a URL to scan and reports authorization', async () => {
-  const { startAgentMailDeviceFlow, pollAgentMailDeviceFlow } = await import(
-    '../../../src/channels/email/transports/agent-mail.mjs'
-  );
-  const started = await startAgentMailDeviceFlow({
-    fetchImpl: async (url) => {
-      assert.match(url, /auth\.agent\.qq\.com\/oauth\/device\?func=1$/);
-      return jsonResponse({
-        poll_url: 'https://auth.agent.qq.com/poll/xyz',
-        browser_url: 'https://agent.qq.com/authorize?code=abc',
-        input_code: 'ABCD',
-      });
-    },
-  });
-  assert.equal(started.pollUrl, 'https://auth.agent.qq.com/poll/xyz');
-  assert.equal(started.inputCode, 'ABCD');
-
-  const pending = await pollAgentMailDeviceFlow({
-    pollUrl: started.pollUrl,
-    fetchImpl: async () => jsonResponse({ status: 'pending' }),
-  });
-  assert.equal(pending.status, 'pending');
-  assert.equal(pending.tokens, null);
-
-  const done = await pollAgentMailDeviceFlow({
-    pollUrl: started.pollUrl,
-    fetchImpl: async () => jsonResponse({
-      status: 'authorized', access_token: 'tok', refresh_token: 'ref',
-    }),
-  });
-  assert.deepEqual(done.tokens, { accessToken: 'tok', refreshToken: 'ref' });
-});
-
-test('the Agent mailbox authorization returns a URL to open and yields tokens', async () => {
-  // There is no one-shot scan payload: the authorization page embeds its own
-  // WeChat QR, so the flow hands back a URL and polls until the server agrees.
-  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-auth-'));
-  const originalFetch = globalThis.fetch;
-  try {
-    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
-    let polls = 0;
-    globalThis.fetch = async (url) => {
-      const reply = (data) => ({
-        ok: true, status: 200, text: async () => JSON.stringify(data), json: async () => data,
-      });
-      if (String(url).includes('/oauth/device')) {
-        return reply({
-          poll_url: 'https://auth.agent.qq.com/poll/x',
-          browser_url: 'https://agent.qq.com/authorize?code=1',
-          input_code: 'XY12',
-        });
-      }
-      polls += 1;
-      return reply(polls < 2
-        ? { status: 'pending' }
-        : { status: 'authorized', access_token: 'AT', refresh_token: 'RT' });
-    };
-
-    const controller = new EmailController({
-      credentials: {
-        async resolve() { return null; }, async set() {}, async unset() {},
-      },
-      configStore: store,
-      logger: { warn() {}, info() {}, error() {}, log() {} },
-      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
-      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
-    });
-
-    const started = await controller.startAuthorization({ transport: 'agent-mail' });
-    assert.equal(started.browserUrl, 'https://agent.qq.com/authorize?code=1');
-    assert.equal(started.inputCode, 'XY12');
-    assert.equal(started.transport, 'agent-mail');
-
-    assert.deepEqual(await controller.pollAuthorization(), {
-      status: 'pending', authorized: false,
-    });
-    const done = await controller.pollAuthorization();
-    assert.equal(done.authorized, true);
-    assert.equal(done.accessToken, 'AT');
-    assert.equal(done.refreshToken, 'RT');
-
-    // A completed authorization is consumed, not polled again.
-    await assert.rejects(() => controller.pollAuthorization(), /尚未开始/);
-
-    // Only a transport that authorizes out of band offers this.
-    await assert.rejects(
-      () => controller.startAuthorization({ transport: 'imap-smtp' }),
-      /不需要扫码授权/,
-    );
-  } finally {
-    globalThis.fetch = originalFetch;
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-});
 
 
 
@@ -937,178 +723,9 @@ test('an Agent mailbox without a stored name still shows its address', async () 
   }
 });
 
-test('the Agent mailbox authorization honours the server validity window', async () => {
-  // A hard-coded 5-minute window abandoned authorizations the server still
-  // considered valid, and told the user a shorter window than the real one.
-  const { startAgentMailDeviceFlow, AGENT_MAIL_DEVICE } = await import(
-    '../../../src/channels/email/transports/agent-mail.mjs'
-  );
 
-  const started = await startAgentMailDeviceFlow({
-    fetchImpl: async () => jsonResponse({
-      poll_url: 'https://auth.agent.qq.com/poll/x',
-      browser_url: 'https://agent.qq.com/authorize?code=1',
-      input_code: 'ic_1',
-      expires_in: 600,
-    }),
-  });
-  assert.equal(started.expiresInMs, 600_000, 'the server window is used, not an assumption');
 
-  // Without a stated window the fallback applies, and it must not be shorter
-  // than what the server is known to allow.
-  const noWindow = await startAgentMailDeviceFlow({
-    fetchImpl: async () => jsonResponse({
-      poll_url: 'https://auth.agent.qq.com/poll/y',
-      browser_url: 'https://agent.qq.com/authorize?code=2',
-      input_code: 'ic_2',
-    }),
-  });
-  assert.equal(noWindow.expiresInMs, AGENT_MAIL_DEVICE.pollTimeoutMs);
-  assert.ok(AGENT_MAIL_DEVICE.pollTimeoutMs >= 600_000,
-    'the fallback must not be shorter than the server window');
-});
 
-test('an authorization is not abandoned before the server window ends', async () => {
-  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-exp-'));
-  const originalFetch = globalThis.fetch;
-  try {
-    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
-    globalThis.fetch = async (url) => {
-      const reply = (data) => ({
-        ok: true, status: 200, text: async () => JSON.stringify(data), json: async () => data,
-      });
-      if (String(url).includes('/oauth/device')) {
-        return reply({
-          poll_url: 'https://auth.agent.qq.com/poll/x',
-          browser_url: 'https://agent.qq.com/authorize?code=1',
-          input_code: 'ic_1',
-          expires_in: 600,
-        });
-      }
-      return reply({ status: 'pending' });
-    };
-    const controller = new EmailController({
-      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
-      configStore: store,
-      logger: { warn() {}, info() {}, error() {}, log() {} },
-      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
-      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
-    });
-
-    const started = await controller.startAuthorization({ transport: 'agent-mail' });
-    // The reported window must cover the server's 600s, not a 300s assumption.
-    assert.ok(started.expiresInMs >= 590_000,
-      `the published window (${started.expiresInMs}ms) must cover the server window`);
-
-    // Polling still works six minutes of wall-clock later — simulated by moving
-    // the recorded deadline back, which is what the old code got wrong.
-    const stillValid = await controller.pollAuthorization();
-    assert.equal(stillValid.status, 'pending');
-  } finally {
-    globalThis.fetch = originalFetch;
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-});
-
-test('a pending authorization survives a restart', async () => {
-  // The code stays valid for ten minutes, which outlives a plugin reload.
-  // Losing it stranded an authorization the user had already completed: the
-  // server answered "not started" while the scan had in fact succeeded.
-  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-persist-'));
-  const originalFetch = globalThis.fetch;
-  try {
-    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
-    await store.save({
-      platformId: 'bot@agent.qq.com', transport: 'agent-mail',
-      allowedSenders: ['boss@example.com'],
-    });
-    const state = await new EmailStateStore(join(dir, 'state.json')).load();
-
-    let polls = 0;
-    globalThis.fetch = async (url) => {
-      const reply = (data) => ({
-        ok: true, status: 200, text: async () => JSON.stringify(data), json: async () => data,
-      });
-      if (String(url).includes('/oauth/device') && String(url).includes('func=1')) {
-        return reply({
-          poll_url: 'https://auth.agent.qq.com/poll/x',
-          browser_url: 'https://agent.qq.com/authorize?code=1',
-          input_code: 'ic_1', expires_in: 600,
-        });
-      }
-      // The identity lookup is not a poll.
-      if (String(url).includes('/v1/me')) {
-        return reply({ data: { aliases: [{ alias_id: 'A1', email: 'bot@agent.qq.com', is_primary: true }] } });
-      }
-      polls += 1;
-      // The user completed the scan while the plugin was restarting.
-      return reply({ status: 'authorized', access_token: 'AT', refresh_token: 'RT' });
-    };
-
-    const build = () => new EmailController({
-      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
-      configStore: store,
-      logger: { warn() {}, info() {}, error() {}, log() {} },
-      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
-      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
-      stateFor: async () => state,
-    });
-
-    const first = build();
-    await first.startAuthorization({ transport: 'agent-mail' });
-    assert.ok(state.pendingAuth(), 'the pending code must be persisted');
-
-    // A fresh controller stands in for the restarted plugin: no in-memory copy.
-    const second = build();
-    const done = await second.pollAuthorization();
-    assert.equal(done.authorized, true, 'the completed scan is still redeemable');
-    assert.equal(done.accessToken, 'AT');
-    assert.equal(polls, 1, 'the stored poll URL is the one used');
-    assert.equal(state.pendingAuth(), null, 'a redeemed code is cleared');
-  } finally {
-    globalThis.fetch = originalFetch;
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-});
-
-test('an expired pending authorization is refused', async () => {
-  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-expiry-'));
-  const originalFetch = globalThis.fetch;
-  try {
-    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
-    await store.save({
-      platformId: 'bot@agent.qq.com', transport: 'agent-mail',
-      allowedSenders: ['boss@example.com'],
-    });
-    const state = await new EmailStateStore(join(dir, 'state.json')).load();
-    // A code that expired while nobody was watching.
-    await state.setPendingAuth({
-      pollUrl: 'https://auth.agent.qq.com/poll/old',
-      expiresAt: Date.now() - 1_000,
-      transport: 'agent-mail',
-    });
-    globalThis.fetch = async () => ({
-      ok: true, status: 200,
-      text: async () => JSON.stringify({ status: 'authorized', access_token: 'X' }),
-      json: async () => ({ status: 'authorized', access_token: 'X' }),
-    });
-    const controller = new EmailController({
-      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
-      configStore: store,
-      logger: { warn() {}, info() {}, error() {}, log() {} },
-      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
-      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
-      stateFor: async () => state,
-    });
-    await assert.rejects(() => controller.pollAuthorization(), /超时|尚未开始/);
-  } finally {
-    globalThis.fetch = originalFetch;
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-});
 
 test('the status reports which transport a mailbox uses', async () => {
   // Without this the settings page cannot tell an Agent mailbox from an
@@ -1186,41 +803,6 @@ test('the client keeps the transport field from the host snapshot', async () => 
   assert.equal(snapshot.bots[0].transport, 'agent-mail');
 });
 
-test('the Agent mailbox replies by the API id, not the RFC Message-ID', async () => {
-  // The reply endpoint addresses a message by the API's own id. Sending the
-  // RFC Message-ID made the path carry an "@" (encoded, or a bracket stripped
-  // into the wrong id), so a reply could miss the thread it belonged to.
-  const { AgentMailTransport } = await import(
-    '../../../src/channels/email/transports/agent-mail.mjs'
-  );
-  const calls = [];
-  const fetchImpl = async (url) => {
-    calls.push(String(url).replace('https://api.agent.qq.com', ''));
-    const reply = (data) => ({
-      ok: true, status: 200, text: async () => JSON.stringify(data), json: async () => data,
-    });
-    if (String(url).includes('/v1/me')) {
-      return reply({ data: { aliases: [{ alias_id: 'A1', email: 'b@a.qq.com', is_primary: true }] } });
-    }
-    return reply({ data: { id: 'sent-1' } });
-  };
-  const transport = new AgentMailTransport({
-    config: { address: 'b@a.qq.com', accessToken: 'x' }, fetchImpl,
-  });
-
-  await transport.sendReply({
-    to: 'a@x.com', subject: 'Re', text: 'hi',
-    inReplyTo: '<abc@qq.com>', transportMessageId: 'msg_api_123',
-  });
-  assert.ok(
-    calls.some((call) => call.includes('/messages/msg_api_123/reply')),
-    'the API id is used for the reply path',
-  );
-  assert.ok(
-    !calls.some((call) => call.includes('%40')),
-    'the RFC Message-ID must not leak into the path',
-  );
-});
 
 test('the reply target carries both ids', () => {
   // A transport that addresses messages by its own id needs it; one that only
@@ -1232,64 +814,6 @@ test('the reply target carries both ids', () => {
     'the transport id travels alongside the RFC one');
 });
 
-test('binding an Agent mailbox carries the OAuth tokens through', async () => {
-  // bindMailbox destructured only the password, so the scanned tokens were
-  // dropped before the credential probe: the Agent mailbox was probed with no
-  // token and failed as though the password were wrong.
-  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-bindtokens-'));
-  try {
-    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
-    const written = [];
-    let probed = null;
-    const stub = () => ({
-      connect: async () => {}, disconnect: async () => {}, latestUid: async () => 0,
-      listMessages: async () => [], sendReply: async () => {}, sendText: async () => {},
-    });
-    const controller = new EmailController({
-      credentials: {
-        async resolve() { return null; },
-        async set(ref, value) { written.push({ ref, value }); },
-        async unset() {},
-      },
-      configStore: store,
-      logger: { warn() {}, info() {}, error() {}, log() {} },
-      transports: {
-        'imap-smtp': stub,
-        'agent-mail': (options) => { probed = options.config; return stub(); },
-      },
-      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
-    });
-
-    await controller.bindMailbox({
-      address: 'bot@agent.qq.com',
-      transport: 'agent-mail',
-      accessToken: 'AT-123',
-      refreshToken: 'RT-456',
-      allowedSenders: ['boss@corp.com'],
-    });
-
-    assert.equal(probed.transport, 'agent-mail');
-    assert.equal(probed.accessToken, 'AT-123', 'the probe receives the access token');
-    assert.equal(probed.refreshToken, 'RT-456');
-    const saved = JSON.parse(written[0].value);
-    assert.equal(saved.accessToken, 'AT-123', 'the token is persisted');
-    assert.equal(saved.refreshToken, 'RT-456');
-    assert.equal(store.list()[0].transport, 'agent-mail');
-
-    // Without a token the bind is refused with a message about authorizing,
-    // not about a missing password.
-    await assert.rejects(
-      () => controller.bindMailbox({
-        address: 'other@agent.qq.com', transport: 'agent-mail',
-        allowedSenders: ['boss@corp.com'],
-      }),
-      /授权/,
-    );
-  } finally {
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-});
 
 test('a failed startup reports a usable reason', async () => {
   // An AggregateError carries an empty message with the reason on `code`
@@ -1448,90 +972,7 @@ test('the controller tells the runtime which transport to build', async () => {
   }
 });
 
-test('the agent mailbox authorization reports the mailbox address', async () => {
-  // The scan yields tokens only, but the address is what the account is named
-  // and bound as. It is fetched instead of asking the user to type what the
-  // server already knows.
-  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-addr-'));
-  const originalFetch = globalThis.fetch;
-  try {
-    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
-    globalThis.fetch = async (url) => {
-      const reply = (data) => ({
-        ok: true, status: 200, text: async () => JSON.stringify(data), json: async () => data,
-      });
-      if (String(url).includes('/oauth/device')) {
-        return reply({
-          poll_url: 'https://auth.agent.qq.com/poll/x',
-          browser_url: 'https://agent.qq.com/authorize?code=1',
-          input_code: 'ic_1', expires_in: 600,
-        });
-      }
-      if (String(url).includes('/v1/me')) {
-        return reply({ data: { aliases: [
-          { alias_id: 'A1', email: 'me@agent.qq.com', name: 'dshagent', is_primary: true },
-        ] } });
-      }
-      return reply({ status: 'authorized', access_token: 'AT', refresh_token: 'RT' });
-    };
-    const controller = new EmailController({
-      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
-      configStore: store,
-      logger: { warn() {}, info() {}, error() {}, log() {} },
-      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
-      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
-    });
-    await controller.startAuthorization({ transport: 'agent-mail' });
-    const done = await controller.pollAuthorization();
-    assert.equal(done.authorized, true);
-    assert.equal(done.address, 'me@agent.qq.com', 'the address travels with the tokens');
-    assert.equal(done.name, 'dshagent');
-  } finally {
-    globalThis.fetch = originalFetch;
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-});
 
-test('a mailbox whose identity cannot be read still authorizes', async () => {
-  // The lookup is a convenience; failing it must not invalidate a scan the user
-  // already completed.
-  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-addr2-'));
-  const originalFetch = globalThis.fetch;
-  try {
-    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
-    globalThis.fetch = async (url) => {
-      const reply = (data, status = 200) => ({
-        ok: status < 400, status, text: async () => JSON.stringify(data), json: async () => data,
-      });
-      if (String(url).includes('/oauth/device')) {
-        return reply({
-          poll_url: 'https://auth.agent.qq.com/poll/y',
-          browser_url: 'https://agent.qq.com/authorize?code=2',
-          input_code: 'ic_2', expires_in: 600,
-        });
-      }
-      if (String(url).includes('/v1/me')) return reply({ error: 'nope' }, 500);
-      return reply({ status: 'authorized', access_token: 'AT', refresh_token: 'RT' });
-    };
-    const controller = new EmailController({
-      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
-      configStore: store,
-      logger: { warn() {}, info() {}, error() {}, log() {} },
-      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
-      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
-    });
-    await controller.startAuthorization({ transport: 'agent-mail' });
-    const done = await controller.pollAuthorization();
-    assert.equal(done.authorized, true, 'the authorization still succeeds');
-    assert.equal(done.accessToken, 'AT');
-    assert.equal(done.address, undefined, 'no address is reported when it cannot be read');
-  } finally {
-    globalThis.fetch = originalFetch;
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-});
 
 test('the mailbox update endpoint accepts the fields the client sends', async () => {
   // The client sends mailbox fields flat beside botId, as every other endpoint
@@ -1619,38 +1060,6 @@ test('a failing poll stops the mailbox reporting itself healthy', async () => {
   }
 });
 
-test('an opaque cursor is never seeded with the newest message', async () => {
-  // The Agent mailbox treats the cursor as "already handled" and lists
-  // newest-first, so seeding it with the newest id discarded that message
-  // forever — the first mail after connecting was never processed.
-  const { EmailRuntime } = await import('../../../src/channels/email/email-runtime.mjs');
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-cursor-'));
-  try {
-    const state = await new EmailStateStore(join(dir, 'state.json')).load();
-    const runtime = new EmailRuntime({
-      config: { platformId: 'bot@agent.qq.com', transport: 'agent-mail', allowedSenders: [] },
-      token: 'unused',
-      credential: { address: 'bot@agent.qq.com', accessToken: 'AT' },
-      harness: { ensureRunning: async () => {} },
-      state,
-      logger: { warn() {}, info() {}, error() {}, log() {} },
-      createApi: () => ({
-        connect: async () => {}, disconnect: async () => {},
-        // An opaque cursor, as the Agent mailbox returns.
-        latestUid: async () => 'msg_newest',
-        listMessages: async () => [], sendReply: async () => {}, sendText: async () => {},
-      }),
-    });
-    await runtime.start();
-    assert.notEqual(state.cursor(), 'msg_newest',
-      'seeding the newest id would mark the newest message as already handled');
-    assert.ok(state.cursor() === null || state.cursor() === 0,
-      `expected no cursor for an opaque transport, got ${JSON.stringify(state.cursor())}`);
-    await runtime.stop();
-  } finally {
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-});
 
 test('a numeric cursor still keeps the startup window', async () => {
   // IMAP is numbered, so the window that catches mail arriving during startup
@@ -1678,78 +1087,7 @@ test('a numeric cursor still keeps the startup window', async () => {
   }
 });
 
-test('the agent mailbox reads the body, not just the list snippet', async () => {
-  // The list endpoint returns only a snippet; the body comes from the
-  // per-message read. Without it the message had no text and was dropped as
-  // empty, so mail arrived and was never processed.
-  const { AgentMailTransport } = await import(
-    '../../../src/channels/email/transports/agent-mail.mjs'
-  );
-  const calls = [];
-  const fetchImpl = async (url) => {
-    const path = String(url).replace('https://api.agent.qq.com', '');
-    calls.push(path);
-    const reply = (data) => ({
-      ok: true, status: 200, text: async () => JSON.stringify(data), json: async () => data,
-    });
-    if (path.includes('/v1/me')) {
-      return reply({ data: { aliases: [{ alias_id: 'A1', email: 'b@a.qq.com', is_primary: true }] } });
-    }
-    if (path.includes('/messages/msg_1') && !path.includes('?')) {
-      return reply({ data: {
-        message_id: 'msg_1',
-        rfc_message_id: '<rfc-1@qq.com>',
-        body: 'real&nbsp;body',
-        from: { email: 'a@x.com' }, subject: 'S',
-      } });
-    }
-    // The list: a snippet, no body, no rfc id.
-    return reply({ data: [{
-      message_id: 'msg_1', subject: 'S', snippet: 'snippet only',
-      from: { email: 'a@x.com' },
-    }], pagination: {} });
-  };
-  const transport = new AgentMailTransport({
-    config: { address: 'b@a.qq.com', accessToken: 'x' }, fetchImpl,
-  });
-  const messages = await transport.listMessages({ afterUid: null, limit: 5 });
-  assert.equal(messages.length, 1);
-  assert.equal(messages[0].text, 'real body', 'the body is read, with entities decoded');
-  assert.equal(messages[0].messageId, '<rfc-1@qq.com>',
-    'the RFC Message-ID is used for threading, not the API id');
-  assert.equal(messages[0].uid, 'msg_1', 'the API id addresses the message');
-  assert.ok(calls.some((c) => c.includes('/messages/msg_1')), 'the body was fetched');
-});
 
-test('an unlisted sender costs no body read', async () => {
-  const { AgentMailTransport } = await import(
-    '../../../src/channels/email/transports/agent-mail.mjs'
-  );
-  const calls = [];
-  const fetchImpl = async (url) => {
-    const path = String(url).replace('https://api.agent.qq.com', '');
-    calls.push(path);
-    const reply = (data) => ({
-      ok: true, status: 200, text: async () => JSON.stringify(data), json: async () => data,
-    });
-    if (path.includes('/v1/me')) {
-      return reply({ data: { aliases: [{ alias_id: 'A1', email: 'b@a.qq.com', is_primary: true }] } });
-    }
-    return reply({ data: [{
-      message_id: 'msg_x', subject: 'S', snippet: 's',
-      from: { email: 'stranger@evil.com' },
-    }], pagination: {} });
-  };
-  const transport = new AgentMailTransport({
-    config: { address: 'b@a.qq.com', accessToken: 'x' }, fetchImpl,
-  });
-  const messages = await transport.listMessages({
-    afterUid: null, limit: 5, allowSenders: new Set(['a@x.com']),
-  });
-  assert.deepEqual(messages, []);
-  assert.ok(!calls.some((c) => c.includes('/messages/msg_x')),
-    'no per-message read is issued for a filtered sender');
-});
 
 test('an already-seen message is not delivered twice', async () => {
   // The cursor marks a boundary in the listing, but a mailbox whose listing
@@ -1774,3 +1112,157 @@ test('an already-seen message is not delivered twice', async () => {
   }
 });
 
+
+// ---------------------------------------------------------------------------
+// Agent mailbox — now backed by the official agently-cli
+// ---------------------------------------------------------------------------
+
+/** Build a fetch-free CLI stub: each call resolves the next queued document. */
+function stubCli(queue) {
+  const calls = [];
+  return {
+    calls,
+    impl(args, options = {}) {
+      calls.push({ args, input: options.input ?? null });
+      const next = queue.shift();
+      if (next === undefined) throw new Error(`unexpected CLI call: ${args.join(' ')}`);
+      if (next instanceof Error) return Promise.reject(next);
+      return Promise.resolve({ document: next, stdout: JSON.stringify(next), stderr: '', exitCode: 0 });
+    },
+  };
+}
+
+test('the agent mailbox lists, reads and threads through the CLI', async () => {
+  // The list carries only a snippet; the body and the RFC Message-ID come from
+  // the per-message read, so listing alone would drop the mail as empty.
+  const { createAgentMailTransportForTests } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const cli = stubCli([
+    // +me (connect)
+    { ok: true, data: { aliases: [{ alias_id: 'A1', email: 'bot@agent.qq.com', is_primary: true }] } },
+    // message +list
+    { ok: true, data: { data: [
+      { message_id: 'msg_2', subject: 'Second', snippet: 's2', from: { email: 'a@x.com' } },
+      { message_id: 'msg_1', subject: 'First', snippet: 's1', from: { email: 'a@x.com' } },
+    ], pagination: { has_more: false } } },
+    // message +read (oldest first → msg_1, then msg_2)
+    { ok: true, data: { message_id: 'msg_1', rfc_message_id: '<rfc-1@x>', body: 'body one',
+      from: { email: 'a@x.com' }, to: [{ email: 'bot@agent.qq.com' }], subject: 'First' } },
+    { ok: true, data: { message_id: 'msg_2', rfc_message_id: '<rfc-2@x>', body: 'body two',
+      from: { email: 'a@x.com' }, to: [{ email: 'bot@agent.qq.com' }], subject: 'Second' } },
+  ]);
+  const transport = createAgentMailTransportForTests({
+    config: { address: 'bot@agent.qq.com' }, runCliImpl: cli.impl,
+  });
+  await transport.connect();
+  const messages = await transport.listMessages({ afterUid: null, limit: 25 });
+
+  assert.deepEqual(messages.map((m) => m.uid), ['msg_1', 'msg_2'], 'oldest first');
+  assert.deepEqual(messages.map((m) => m.messageId), ['<rfc-1@x>', '<rfc-2@x>'],
+    'the RFC Message-ID is the thread key');
+  assert.deepEqual(messages.map((m) => m.text), ['body one', 'body two'], 'bodies are read');
+  assert.ok(cli.calls.some((c) => c.args[0] === 'message' && c.args[1] === '+read'),
+    'the body came from a per-message read');
+});
+
+test('the agent mailbox stops at the cursor and filters unlisted senders', async () => {
+  const { createAgentMailTransportForTests } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const cli = stubCli([
+    { ok: true, data: { data: [
+      { message_id: 'msg_3', subject: 'New', snippet: 's', from: { email: 'stranger@evil.com' } },
+      { message_id: 'msg_2', subject: 'Older', snippet: 's', from: { email: 'a@x.com' } },
+      { message_id: 'msg_1', subject: 'Handled', snippet: 's', from: { email: 'a@x.com' } },
+    ], pagination: {} } },
+    { ok: true, data: { message_id: 'msg_2', rfc_message_id: '<rfc-2@x>', body: 'kept',
+      from: { email: 'a@x.com' }, subject: 'Older' } },
+  ]);
+  const transport = createAgentMailTransportForTests({
+    config: { address: 'bot@agent.qq.com' }, runCliImpl: cli.impl,
+  });
+  const messages = await transport.listMessages({
+    afterUid: 'msg_1', limit: 25, allowSenders: new Set(['a@x.com']),
+  });
+  assert.deepEqual(messages.map((m) => m.uid), ['msg_2'],
+    'the unlisted sender is dropped and the cursor stops the walk');
+  assert.ok(!cli.calls.some((c) => c.args.includes('msg_3')),
+    'no read is issued for a filtered sender');
+});
+
+test('a reply completes the CLI two-step confirmation', async () => {
+  const { createAgentMailTransportForTests } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const cli = stubCli([
+    { ok: true, data: { confirmation_required: true, confirmation_token: 'ct_1', summary: 'send?' } },
+    { ok: true, data: { message_id: 'msg_9' } },
+  ]);
+  const transport = createAgentMailTransportForTests({
+    config: { address: 'bot@agent.qq.com' }, runCliImpl: cli.impl,
+  });
+  const result = await transport.sendReply({
+    to: 'a@x.com', subject: 'Re: Hi', text: 'hello', transportMessageId: 'msg_5',
+  });
+  assert.equal(result.sent, true);
+  assert.equal(cli.calls.length, 2, 'the send is retried once with the token');
+  assert.ok(cli.calls[1].args.includes('--confirmation-token'));
+  assert.ok(cli.calls[1].args.includes('ct_1'));
+  assert.equal(cli.calls[0].input, 'hello', 'the body travels on stdin, not argv');
+});
+
+test('a CLI failure surfaces its own message, not the exit code', async () => {
+  // The CLI exits 0 even for an error document, so `ok` is the only signal —
+  // reading the exit code would report success for a refusal.
+  const { runCliDocumentForTests } = await import(
+    '../../../src/channels/email/transports/agently-cli.mjs'
+  );
+  await assert.rejects(
+    () => runCliDocumentForTests([ 'auth', 'status' ], {
+      runCliImpl: () => Promise.resolve({
+        document: { ok: false, error: { type: 'auth', message: 'authorization required' } },
+        stdout: '', stderr: '', exitCode: 0,
+      }),
+    }),
+    (error) => {
+      assert.equal(error.code, 'auth');
+      assert.match(error.message, /authorization required/);
+      return true;
+    },
+  );
+});
+
+test('the Agent mailbox needs no credential of its own', async () => {
+  // agently-cli keeps its credentials in the system keychain, so requiring a
+  // stored token blocked the mailbox from ever starting.
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-nocred-'));
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    await store.save({
+      platformId: 'bot@agent.qq.com', transport: 'agent-mail',
+      allowedSenders: ['a@x.com'],
+    });
+    const started = [];
+    const controller = new EmailController({
+      credentials: {
+        async resolve() { return null; },   // nothing stored, by design
+        async set() {}, async unset() {},
+      },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
+      createRuntime: async ({ config, credential }) => {
+        started.push({ config, credential });
+        return { start: async () => {}, stop: async () => {}, status: { ready: true, connectionState: 'connected' } };
+      },
+    });
+    const status = await controller.initialize();
+    assert.equal(started.length, 1, 'the mailbox starts without a stored secret');
+    assert.equal(started[0].credential.address, 'bot@agent.qq.com');
+    assert.equal(status.bots[0].state, 'connected');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});

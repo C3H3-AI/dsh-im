@@ -1,217 +1,86 @@
 /**
- * Tencent Agent Mail transport (agent.qq.com).
+ * Agent mailbox transport, backed by the official `agently-cli`.
  *
- * Not a standard mailbox: it authorizes by QR code, reads mail by long-polling
- * an event stream, and speaks HTTP instead of IMAP/SMTP. Everything above the
- * transport — thread mapping, the sender allowlist, quote stripping, session
- * binding, loop prevention — is shared with the IMAP/SMTP transport.
+ * This transport speaks the same contract as the IMAP/SMTP one
+ * (`transport.mjs`); only the wire protocol differs. All protocol knowledge —
+ * OAuth, token storage, refresh, retry — belongs to the CLI, which is the only
+ * implementation the server accepts refresh tokens from.
  *
- * Protocol notes live in docs/agent-mail-protocol.md.
+ * Command shapes come from `--print-output-schema`, not guesswork.
  */
-import { normalizeAddress, parseMessageIds } from '../mail-format.mjs';
 
-const API_BASE = 'https://api.agent.qq.com';
-const AUTH_BASE = 'https://auth.agent.qq.com';
-// Public, version-bound constants from the official CLI (agently-cli v1.0.15).
-const CLIENT_ID = 'cli_002e8cd1f5e97858';
-const CLIENT_VERSION = '1.0.15';
-// The server validates the client identity by User-Agent; an unrecognized one
-// is rejected as "unsupported client", so the official CLI value is required.
-const USER_AGENT = 'agently-cli/1.0.15 (windows/amd64; agent/workbuddy)';
-const REQUEST_TIMEOUT_MS = 15_000;
-const POLL_TIMEOUT_MS = 25_000;
+import {
+  AgentMailCliError,
+  isCliAvailable,
+  runCli,
+  startCliLogin,
+} from './agently-cli.mjs';
+import {
+  MAX_REPLY_CHARS,
+  normalizeAddress,
+  stripQuotedHistory,
+} from '../mail-format.mjs';
+import { assertTransport, replySubject } from '../transport.mjs';
+
+/** Re-exported so callers keep one import site for Agent mailbox errors. */
+export { AgentMailCliError as AgentMailError };
+
 /** How many messages one poll may return. */
 const DEFAULT_PAGE_SIZE = 25;
 
-export class AgentMailError extends Error {
-  constructor(message, { code = 'agent-mail-error', status = null } = {}) {
-    super(message);
-    this.name = 'AgentMailError';
-    this.code = code;
-    this.status = status;
-  }
-}
-
-/** Device-flow constants, exported so the settings UI can drive authorization. */
-export const AGENT_MAIL_DEVICE = Object.freeze({
-  authBase: AUTH_BASE,
-  clientId: CLIENT_ID,
-  clientVersion: CLIENT_VERSION,
-  userAgent: USER_AGENT,
-  pollIntervalMs: 5_000,
-  // Fallback only: the server states expires_in per flow (currently 600s) and
-  // startAgentMailDeviceFlow returns that. Assuming a shorter window abandons
-  // authorizations the server still considers valid.
-  pollTimeoutMs: 600_000,
-});
+/** Mailbox folders the CLI understands. */
+const INBOX = 'inbox';
 
 /**
- * Start the QR device flow: returns the URL to show as a code and the poll
- * endpoint to watch. The authorization page embeds its own WeChat QR, so the
- * caller displays this URL rather than a one-shot scan payload.
- */
-export async function startAgentMailDeviceFlow({
-  fetchImpl = fetch,
-  hostname = 'dsh',
-  signal,
-} = {}) {
-  const response = await fetchImpl(`${AUTH_BASE}/oauth/device?func=1`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'user-agent': USER_AGENT },
-    body: JSON.stringify({
-      app_id: CLIENT_ID,
-      cli_agentname: 'WorkBuddy',
-      cli_agentua: 'workbuddy',
-      cli_hostname: hostname,
-      cli_ua: USER_AGENT,
-      cli_version: CLIENT_VERSION,
-    }),
-    signal,
-  });
-  if (!response.ok) {
-    throw new AgentMailError(`device flow init failed: HTTP ${response.status}`, {
-      code: 'device-flow-failed', status: response.status,
-    });
-  }
-  const body = await response.json().catch(() => null);
-  if (!body?.poll_url) {
-    throw new AgentMailError('device flow returned no poll_url', { code: 'device-flow-invalid' });
-  }
-  const expiresIn = Number(body.expires_in);
-  return {
-    pollUrl: String(body.poll_url),
-    browserUrl: String(body.browser_url ?? ''),
-    inputCode: String(body.input_code ?? ''),
-    // The server states how long the code stays valid; honour it rather than
-    // assuming a window, which previously expired the flow early.
-    expiresInMs: Number.isFinite(expiresIn) && expiresIn > 0
-      ? expiresIn * 1_000
-      : AGENT_MAIL_DEVICE.pollTimeoutMs,
-  };
-}
-
-/** Poll the device flow once. Returns the tokens when the user has authorized. */
-export async function pollAgentMailDeviceFlow({ pollUrl, fetchImpl = fetch, signal } = {}) {
-  const response = await fetchImpl(pollUrl, {
-    headers: { 'user-agent': USER_AGENT },
-    signal,
-  });
-  if (!response.ok) {
-    throw new AgentMailError(`device poll failed: HTTP ${response.status}`, {
-      code: 'device-poll-failed', status: response.status,
-    });
-  }
-  const body = await response.json().catch(() => null);
-  if (!body || typeof body !== 'object') {
-    throw new AgentMailError('device poll returned a non-JSON response', {
-      code: 'device-poll-invalid',
-    });
-  }
-  const status = String(body.status ?? 'pending');
-  if (status !== 'authorized') return { status, tokens: null };
-  if (!body.access_token) {
-    throw new AgentMailError('authorized but no access_token returned', {
-      code: 'device-poll-invalid',
-    });
-  }
-  return {
-    status,
-    tokens: {
-      accessToken: String(body.access_token),
-      refreshToken: String(body.refresh_token ?? ''),
-    },
-  };
-}
-
-/** Fetch wrapper with the SDK's required headers and an explicit timeout. */
-async function request(fetchImpl, url, { method = 'GET', token, body, signal } = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  const onAbort = () => controller.abort();
-  signal?.addEventListener?.('abort', onAbort, { once: true });
-  try {
-    const headers = { 'user-agent': USER_AGENT, accept: 'application/json' };
-    if (token) headers.authorization = `Bearer ${token}`;
-    if (body !== undefined) headers['content-type'] = 'application/json';
-    const response = await fetchImpl(url, {
-      method,
-      headers,
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    let parsed = null;
-    try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
-    return { status: response.status, body: parsed };
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener?.('abort', onAbort);
-  }
-}
-
-/** Map one API message onto the mailparser-shaped object the runtime expects. */
-export function normalizeAgentMailMessage(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  const id = String(raw.id ?? raw.message_id ?? '').trim();
-  if (!id) return null;
-  const bodyText = typeof raw.body === 'string'
-    ? raw.body
-    : typeof raw.text === 'string' ? raw.text : '';
-  return {
-    // `uid` is the API's own id, used for every path; `messageId` must be the
-    // RFC Message-ID, which the API exposes separately as rfc_message_id. Using
-    // the API id as the thread id failed the RFC parse and dropped the message.
-    uid: id,
-    messageId: String(raw.rfc_message_id ?? raw.rfcMessageId ?? ''),
-    from: { value: [{ address: normalizeAddress(raw.from?.email ?? raw.from), name: raw.from?.name }] },
-    to: { value: (Array.isArray(raw.to) ? raw.to : []).map((entry) => ({
-      address: normalizeAddress(entry?.email ?? entry), name: entry?.name,
-    })).filter((entry) => entry.address) },
-    cc: { value: (Array.isArray(raw.cc) ? raw.cc : []).map((entry) => ({
-      address: normalizeAddress(entry?.email ?? entry), name: entry?.name,
-    })).filter((entry) => entry.address) },
-    subject: String(raw.subject ?? ''),
-    text: bodyText,
-    html: typeof raw.body_html === 'string' ? raw.body_html : '',
-    attachments: (Array.isArray(raw.attachments) ? raw.attachments : []).map((file) => ({
-      filename: String(file?.name ?? file?.filename ?? 'attachment'),
-      contentType: String(file?.content_type ?? file?.contentType ?? 'application/octet-stream'),
-      size: Number.isSafeInteger(file?.size) ? file.size : undefined,
-      // Downloaded lazily so a poll of headers does not pull every attachment.
-      attachmentId: String(file?.id ?? file?.attachment_id ?? ''),
-    })),
-    headers: { get: (name) => {
-      const key = String(name).toLowerCase();
-      const value = raw.headers?.[key] ?? raw.headers?.[name];
-      return typeof value === 'string' ? value : undefined;
-    } },
-  };
-}
-
-/**
- * Resolve the mailbox identity behind a token pair.
+ * Begin an authorization and return the URL the user opens or scans.
  *
- * The authorization returns only tokens, but the address is what the mailbox is
- * named and bound as — fetching it here keeps the user from typing something
- * the server already knows.
+ * `agently-cli auth login` prints the URL and then blocks until the scan
+ * completes, so the process is left running and the caller observes the outcome
+ * through `agentMailAuthorizationStatus`.
  */
-export async function fetchAgentMailIdentity({
-  accessToken, refreshToken = '', fetchImpl = fetch, signal,
-} = {}) {
-  const response = await request(fetchImpl, `${API_BASE}/v1/me`, {
-    token: accessToken, signal,
-  });
-  if (response.status >= 400) {
-    throw new AgentMailError(`/v1/me failed: HTTP ${response.status}`, {
-      code: 'identity-failed', status: response.status,
-    });
+export async function startAgentMailAuthorization({ signal } = {}) {
+  const started = await startCliLogin({ signal });
+  return {
+    browserUrl: started.browserUrl,
+    inputCode: started.inputCode,
+    // The window belongs to the server; this is the CLI's own default.
+    expiresInMs: 600_000,
+  };
+}
+
+/** The authorization status, as the CLI reports it. */
+export async function agentMailAuthorizationStatus({ signal } = {}) {
+  try {
+    const { document } = await runCli(['auth', 'status'], { signal });
+    const data = document?.data ?? {};
+    return {
+      loggedIn: data.logged_in === true,
+      status: String(data.status ?? ''),
+      message: String(data.message ?? ''),
+      workspace: String(data.workspace ?? ''),
+    };
+  } catch (error) {
+    if (error?.code === 'auth') return { loggedIn: false, status: 'not_logged_in', message: error.message };
+    throw error;
   }
-  const aliases = Array.isArray(response.body?.data?.aliases)
-    ? response.body.data.aliases : [];
+}
+
+/** Force a token refresh through the CLI. */
+export async function refreshAgentMailToken({ signal } = {}) {
+  await runCli(['auth', 'refresh'], { signal });
+  return true;
+}
+
+/** The account's own address, from `+me`. */
+export async function fetchAgentMailIdentity({ signal } = {}) {
+  const { document } = await runCli(['+me'], { signal });
+  const aliases = Array.isArray(document?.data?.aliases) ? document.data.aliases : [];
   const primary = aliases.find((entry) => entry?.is_primary) ?? aliases[0];
-  const address = String(primary?.email ?? '').trim().toLowerCase();
+  const address = normalizeAddress(primary?.email);
   if (!address) {
-    throw new AgentMailError('no email returned by /v1/me', { code: 'identity-missing' });
+    throw new AgentMailCliError('agently-cli reported no mailbox address', {
+      code: 'identity-missing',
+    });
   }
   return {
     address,
@@ -220,326 +89,257 @@ export async function fetchAgentMailIdentity({
   };
 }
 
+/** One message summary or full message, in this channel's shape. */
+export function normalizeAgentMailMessage(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = String(raw.message_id ?? '').trim();
+  if (!id) return null;
+  const addressOf = (entry) => normalizeAddress(entry?.email ?? entry);
+  const people = (list) => (Array.isArray(list) ? list : [])
+    .map((entry) => ({ address: addressOf(entry), name: entry?.name }))
+    .filter((entry) => entry.address);
+  return {
+    // `uid` is the CLI's own id, used for every follow-up command.
+    uid: id,
+    // The RFC Message-ID is the thread key; it only comes with the full read.
+    messageId: String(raw.rfc_message_id ?? '').trim(),
+    from: { value: people(raw.from ? [raw.from] : []) },
+    to: { value: people(raw.to) },
+    cc: { value: people(raw.cc) },
+    subject: String(raw.subject ?? ''),
+    text: typeof raw.body === 'string' ? raw.body : String(raw.snippet ?? ''),
+    html: '',
+    attachments: (Array.isArray(raw.attachments) ? raw.attachments : []).map((file) => ({
+      fileName: String(file?.filename ?? 'attachment'),
+      bytes: Number(file?.size) || 0,
+      mediaType: String(file?.content_type ?? 'application/octet-stream'),
+      attachmentId: String(file?.attachment_id ?? ''),
+    })),
+    headers: { get: () => undefined },
+  };
+}
+
 export class AgentMailTransport {
   #config;
   #signal;
-  #fetch;
-  #token;
-  #refreshToken;
-  #onTokensRefreshed;
-  #aliasId = null;
-  #email = '';
   #connected = false;
+  #address = '';
+  // Indirection so tests can drive the protocol without the real binary.
+  #run = runCli;
 
-  constructor({ config, signal, fetchImpl = fetch, onTokensRefreshed = null } = {}) {
-    if (!config?.address && !config?.accessToken) {
-      throw new TypeError('AgentMailTransport requires an address or an access token');
+  /** Test seam: swap the CLI runner. Not part of the transport contract. */
+  __setRunCliForTests(impl) {
+    if (typeof impl === 'function') this.#run = impl;
+  }
+
+  constructor({ config, signal } = {}) {
+    if (!config || typeof config !== 'object') {
+      throw new TypeError('AgentMailTransport requires a config');
+    }
+    if (!isCliAvailable()) {
+      throw new AgentMailCliError(
+        'the Agent mailbox requires @tencent-qqmail/agently-cli, which is not installed',
+        { code: 'cli-missing' },
+      );
     }
     this.#config = config;
     this.#signal = signal;
-    this.#fetch = fetchImpl;
-    this.#token = config.accessToken ?? '';
-    this.#refreshToken = config.refreshToken ?? '';
-    this.#onTokensRefreshed = typeof onTokensRefreshed === 'function' ? onTokensRefreshed : null;
+    this.#address = normalizeAddress(config.address);
   }
 
   get address() {
-    return this.#config.address ?? this.#email;
+    return this.#address || this.#config.address || '';
   }
 
+  get transportKey() {
+    return 'agent-mail';
+  }
+
+  /** The CLI holds the session, so this only proves it is usable. */
   async connect() {
     if (this.#connected) return;
-    await this.#requireAlias();
+    // Goes through the instance runner so tests never spawn the real binary.
+    const { document } = await this.#run(['+me'], { signal: this.#signal });
+    const aliases = Array.isArray(document?.data?.aliases) ? document.data.aliases : [];
+    const primary = aliases.find((entry) => entry?.is_primary) ?? aliases[0];
+    const address = normalizeAddress(primary?.email);
+    if (!address) {
+      throw new AgentMailCliError('agently-cli reported no mailbox address', {
+        code: 'identity-missing',
+      });
+    }
+    this.#address = address;
     this.#connected = true;
   }
 
   async disconnect() {
-    // Stateless HTTP: nothing to tear down, but the call must be idempotent.
+    // Stateless: each command is its own process, so there is nothing to close.
     this.#connected = false;
   }
 
-  /**
-   * The runtime treats the cursor as an opaque, ordered value. The API pages by
-   * an opaque cursor string, so the newest seen message id is used as one.
-   */
+  /** The newest id, used to seed a cursor. */
   async latestUid() {
     const listed = await this.listMessages({ afterUid: null, limit: 1 });
     return listed.length > 0 ? listed[0].uid : 0;
   }
 
   /**
-   * New mail, oldest first. The API exposes a cursor rather than an id range,
-   * so `afterUid` is the id of the last message already processed; messages up
-   * to and including it are skipped.
+   * New mail, oldest first.
+   *
+   * The CLI lists newest-first, so the page is reversed here. The body is
+   * fetched per message because the list carries only a snippet; senders are
+   * filtered first so an unlisted address costs no extra call.
    */
   async listMessages({ afterUid = null, limit = DEFAULT_PAGE_SIZE, allowSenders = null } = {}) {
     const allowed = allowSenders instanceof Set && allowSenders.size > 0 ? allowSenders : null;
-    const aliasId = await this.#requireAlias();
     const collected = [];
     let cursor = '';
-    // The API pages newest-first; walk until the already-seen id is reached or
-    // enough messages have been gathered.
+
     for (let page = 0; page < 5; page += 1) {
-      const query = [`limit=${DEFAULT_PAGE_SIZE}`, 'dir=inbox'];
-      if (cursor) query.push(`cursor=${encodeURIComponent(cursor)}`);
-      const { status, body } = await this.#request('GET', `/v1/aliases/${aliasId}/messages?${query.join('&')}`);
-      if (status >= 400) {
-        throw new AgentMailError(`list messages failed: HTTP ${status}`, {
-          code: 'list-failed', status,
-        });
-      }
-      const items = Array.isArray(body?.data) ? body.data : [];
+      const args = ['message', '+list', '--dir', INBOX, '--limit', String(DEFAULT_PAGE_SIZE)];
+      if (cursor) args.push('--cursor', cursor);
+      const { document } = await this.#run(args, { signal: this.#signal });
+      const items = Array.isArray(document?.data?.data) ? document.data.data : [];
+
       for (const raw of items) {
-        const id = String(raw?.id ?? raw?.message_id ?? '');
+        const id = String(raw?.message_id ?? '').trim();
+        if (!id) continue;
+        // The cursor is the newest already-handled id: everything before it in
+        // the list is newer, so reaching it means the rest is history.
         if (afterUid !== null && afterUid !== undefined && id === String(afterUid)) {
-          return await this.#oldestFirst(collected, allowed);
+          return this.#oldestFirst(collected, allowed);
         }
-        if (allowed) {
-          const from = normalizeAddress(raw?.from?.email ?? raw?.from);
-          if (!from || !allowed.has(from)) continue;
-        }
+        if (allowed && !allowed.has(normalizeAddress(raw?.from?.email))) continue;
         collected.push(raw);
-        if (collected.length >= limit) return await this.#oldestFirst(collected, allowed);
+        if (collected.length >= limit) return this.#oldestFirst(collected, allowed);
       }
-      cursor = String(body?.pagination?.next_cursor ?? body?.pagination?.cursor ?? '');
-      if (!cursor || items.length === 0) break;
+
+      const next = String(document?.data?.pagination?.next_cursor ?? '');
+      if (!next || items.length === 0) break;
+      cursor = next;
     }
-    return await this.#oldestFirst(collected, allowed);
+    return this.#oldestFirst(collected, allowed);
   }
 
-  /**
-   * Fill in a message's text from the per-message endpoint.
-   *
-   * The list endpoint returns only a snippet, so without this the message has
-   * no body and is dropped as empty. A failed read leaves the snippet in place
-   * rather than losing the mail entirely.
-   */
-  async #withBody(message) {
-    const aliasId = this.#aliasId;
-    const loaded = this.#withAttachmentLoaders(message, aliasId);
-    if (String(loaded.text ?? '').trim()) return loaded;
-    if (!aliasId || !loaded.uid) return loaded;
+  /** Oldest-first, with each message's body and RFC id filled in. */
+  async #oldestFirst(items, allowed) {
+    const ordered = items.slice().reverse();
+    const loaded = [];
+    for (const raw of ordered) {
+      loaded.push(await this.#readMessage(raw, allowed));
+    }
+    return loaded.filter(Boolean);
+  }
+
+  /** Read one message in full, falling back to the summary if that fails. */
+  async #readMessage(raw, allowed) {
+    const summary = normalizeAgentMailMessage(raw);
+    if (!summary) return null;
+    if (allowed && !allowed.has(normalizeAddress(summary.from?.value?.[0]?.address))) return null;
     try {
-      const { status, body } = await this.#request(
-        'GET', `/v1/aliases/${aliasId}/messages/${encodeURIComponent(loaded.uid)}`,
-      );
-      if (status >= 400) return loaded;
-      const full = body?.data ?? body;
-      if (!full || typeof full !== 'object') return loaded;
-      const text = typeof full.body === 'string' ? decodeEntities(full.body) : '';
-      const html = typeof full.body_html === 'string' ? full.body_html : '';
-      // The RFC Message-ID only comes with the full message, so the thread id
-      // is filled in here too.
-      const rfc = String(full.rfc_message_id ?? '').trim();
+      const { document } = await this.#run(['message', '+read', '--id', summary.uid], {
+        signal: this.#signal,
+      });
+      const full = normalizeAgentMailMessage(document?.data ?? {});
+      if (!full) return summary;
       return {
-        ...loaded,
-        ...(rfc ? { messageId: rfc } : {}),
-        text: text || loaded.text,
-        html: html || loaded.html,
+        ...summary,
+        // The full read is the only place the thread id and body appear.
+        messageId: full.messageId || summary.messageId,
+        text: full.text || summary.text,
+        html: full.html || summary.html,
+        attachments: full.attachments.length > 0 ? full.attachments : summary.attachments,
+        cc: full.cc.value.length > 0 ? full.cc : summary.cc,
       };
     } catch {
-      return loaded;
+      // A failed read must not lose the mail; the snippet keeps it usable.
+      return summary;
     }
   }
 
-  /** Attachments download separately, so each one carries its own loader. */
-  #withAttachmentLoaders(message, aliasId) {
-    if (!message.attachments?.length) return message;
-    return {
-      ...message,
-      attachments: message.attachments.map((file) => ({
-        ...file,
-        load: async () => {
-          if (!file.attachmentId || !aliasId) return Buffer.alloc(0);
-          const { status, body } = await this.#request(
-            'GET',
-            `/v1/aliases/${aliasId}/messages/${encodeURIComponent(message.uid)}/attachments/${encodeURIComponent(file.attachmentId)}`,
-          );
-          if (status >= 400) {
-            throw new AgentMailError(`attachment download failed: HTTP ${status}`, {
-              code: 'attachment-failed', status,
-            });
-          }
-          return body;
-        },
-      })),
-    };
-  }
-
-  /** Attachments download separately, so they are attached here as loaders. */
-  /**
-   * Oldest-first, with each message's body loaded.
-   *
-   * The list endpoint returns only a `snippet`; the full body comes from the
-   * per-message endpoint, so a message read straight from the list has no text
-   * and is discarded as empty. Bodies are fetched here, after filtering, so an
-   * unlisted sender never costs a request.
-   */
-  async #oldestFirst(items, allowed) {
-    const normalized = items
-      .slice()
-      .reverse()
-      .map((raw) => normalizeAgentMailMessage(raw))
-      .filter(Boolean)
-      // Filter before loading anything: an unlisted sender must not cost a
-      // body read, and the body is a separate request.
-      .filter((message) => !allowed
-        || allowed.has(normalizeAddress(message.from?.value?.[0]?.address)));
-    return Promise.all(normalized.map((message) => this.#withBody(message)));
-  }
-
+  /** Reply, threading on the message's own RFC id. */
   async sendReply({
-    to, subject, text, inReplyTo, transportMessageId, references, attachments = [],
+    to, subject, text, transportMessageId, references, attachments = [], headers,
   } = {}) {
-    const aliasId = await this.#requireAlias();
-    // The reply endpoint addresses the message by the API's own id, not the RFC
-    // Message-ID header. A transport id is preferred; the RFC one is only a
-    // fallback for a runtime that did not supply it.
-    const apiId = String(transportMessageId ?? '').trim()
-      || stripBrackets(parseMessageIds(inReplyTo)[0] ?? '');
-    // A reply inside a known thread uses the reply endpoint so the server keeps
-    // the conversation headers; otherwise it is a fresh message.
-    if (apiId) {
-      const payload = {
-        body: String(text ?? ''),
-        body_format: 'PLAIN',
-        reply_all: false,
-        ...(attachments.length ? { attachments: await this.#encodeAttachments(attachments) } : {}),
-      };
-      const sent = await this.#sendWithConfirmation(
-        `/v1/aliases/${aliasId}/messages/${encodeURIComponent(apiId)}/reply`,
-        payload,
-      );
-      return { sent: true, messageId: sent?.data?.id ?? null };
+    const body = this.#composeBody(text);
+    const args = [
+      'message', '+reply',
+      '--id', String(transportMessageId ?? ''),
+      '--body-file', '-',
+    ];
+    if (attachments.length > 0) {
+      const uploaded = await this.#uploadAttachments(attachments);
+      for (const id of uploaded) args.push('--attachment', id);
     }
-    return this.sendText({ to, subject, text, attachments });
+    await this.#withConfirmation(args, body, headers);
+    return { sent: true, to, subject: subject ?? replySubject(''), references };
   }
 
-  async sendText({ to, subject, text, attachments = [] } = {}) {
-    const aliasId = await this.#requireAlias();
-    const payload = {
-      to: [{ email: normalizeAddress(to) }],
-      subject: String(subject ?? ''),
-      body: String(text ?? ''),
-      body_format: 'PLAIN',
-      ...(attachments.length ? { attachments: await this.#encodeAttachments(attachments) } : {}),
-    };
-    const sent = await this.#sendWithConfirmation(`/v1/aliases/${aliasId}/messages/send`, payload);
-    return { sent: true, messageId: sent?.data?.id ?? null };
+  /** Send a new message rather than a reply. */
+  async sendText({ to, subject, text, attachments = [], headers } = {}) {
+    const body = this.#composeBody(text);
+    const args = ['message', '+send', '--to', String(to ?? ''), '--body-file', '-'];
+    if (subject) args.push('--subject', String(subject));
+    if (attachments.length > 0) {
+      const uploaded = await this.#uploadAttachments(attachments);
+      for (const id of uploaded) args.push('--attachment', id);
+    }
+    await this.#withConfirmation(args, body, headers);
+    return { sent: true, to, subject };
   }
 
-  async #encodeAttachments(attachments) {
-    return Promise.all(attachments.map(async (file) => ({
-      name: String(file?.filename ?? 'attachment'),
-      content: Buffer.from(file?.content ?? '').toString('base64'),
-      content_type: file?.contentType ?? 'application/octet-stream',
-    })));
+  /** Reply bodies are trimmed to the same ceiling as the IMAP transport. */
+  #composeBody(text) {
+    return stripQuotedHistory(String(text ?? '')).slice(0, MAX_REPLY_CHARS);
+  }
+
+  /** Upload local attachments and return their ids. */
+  async #uploadAttachments(attachments) {
+    const ids = [];
+    for (const file of attachments) {
+      const path = file?.path ?? file?.filePath;
+      if (!path) continue;
+      const { document } = await this.#run(['attachment', '+upload', '--file', path], {
+        signal: this.#signal,
+      });
+      const id = String(document?.data?.attachment_id ?? '').trim();
+      if (id) ids.push(id);
+    }
+    return ids;
   }
 
   /**
-   * The server may answer the first send with CONFIRMATION_REQUIRED; resending
-   * with the returned token completes it. This is part of the protocol, not an
-   * error.
+   * Run a sending command, completing the two-step confirmation.
+   *
+   * The first call returns `confirmation_token` with exit 0; resending the same
+   * arguments plus that token performs the send.
    */
-  async #sendWithConfirmation(path, payload) {
-    const first = await this.#request('POST', path, payload);
-    const error = first.body?.error;
-    if (first.status < 400 && error?.code !== 'CONFIRMATION_REQUIRED') {
-      return first.body;
-    }
-    if (error?.code === 'CONFIRMATION_REQUIRED') {
-      const details = error.details ?? {};
-      const token = details.confirmation_token ?? details.confirmationToken;
-      if (!token) {
-        throw new AgentMailError('send requires confirmation but returned no token', {
-          code: 'confirmation-missing',
-        });
-      }
-      const confirmed = await this.#request('POST', path, { ...payload, confirmation_token: token });
-      if (confirmed.status >= 400) {
-        throw new AgentMailError(`send confirmation failed: HTTP ${confirmed.status}`, {
-          code: 'send-failed', status: confirmed.status,
-        });
-      }
-      return confirmed.body;
-    }
-    throw new AgentMailError(`send failed: HTTP ${first.status}`, {
-      code: 'send-failed', status: first.status,
-    });
-  }
-
-  /** One API call with Bearer auth; a 401 refreshes once and retries. */
-  async #request(method, path, body) {
-    const first = await request(this.#fetch, `${API_BASE}${path}`, {
-      method, token: this.#token, body, signal: this.#signal,
-    });
-    if (first.status !== 401 || !this.#refreshToken) return first;
-    const refreshed = await this.#refresh();
-    if (!refreshed) return first;
-    return request(this.#fetch, `${API_BASE}${path}`, {
-      method, token: this.#token, body, signal: this.#signal,
-    });
-  }
-
-  /** Exchange the refresh token; the server rotates it, so it is persisted. */
-  async #refresh() {
-    const form = new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: this.#refreshToken,
-      client_id: CLIENT_ID,
-      clientversion: CLIENT_VERSION,
-    });
-    const response = await this.#fetch(`${AUTH_BASE}/oauth/token`, {
-      method: 'POST',
-      headers: { 'user-agent': USER_AGENT, 'content-type': 'application/x-www-form-urlencoded' },
-      body: form.toString(),
-    }).catch(() => null);
-    if (!response?.ok) return false;
-    const body = await response.json().catch(() => null);
-    if (!body?.access_token) return false;
-    this.#token = String(body.access_token);
-    if (body.refresh_token) this.#refreshToken = String(body.refresh_token);
-    // A rotated refresh token must survive a restart, or the next refresh fails.
-    await this.#onTokensRefreshed?.({
-      accessToken: this.#token,
-      refreshToken: this.#refreshToken,
-    });
-    return true;
-  }
-
-  /** Resolve the account's alias id, caching it for the connection's lifetime. */
-  async #requireAlias() {
-    if (this.#aliasId) return this.#aliasId;
-    const { status, body } = await this.#request('GET', '/v1/me');
-    if (status >= 400) {
-      throw new AgentMailError(`/v1/me failed: HTTP ${status}`, {
-        code: 'identity-failed', status,
-      });
-    }
-    const aliases = Array.isArray(body?.data?.aliases) ? body.data.aliases : [];
-    const primary = aliases.find((entry) => entry?.is_primary) ?? aliases[0];
-    const aliasId = String(primary?.alias_id ?? '').trim();
-    if (!aliasId) {
-      throw new AgentMailError('no alias_id returned by /v1/me', { code: 'identity-missing' });
-    }
-    this.#aliasId = aliasId;
-    this.#email = String(primary?.email ?? '').trim();
-    return aliasId;
+  async #withConfirmation(args, body, headers) {
+    const extra = headers && typeof headers === 'object'
+      ? Object.entries(headers).flatMap(([name, value]) => (value === undefined || value === null
+        ? [] : ['--header', `${name}: ${value}`]))
+      : [];
+    const first = await this.#run([...args, ...extra], { input: body, signal: this.#signal });
+    const token = String(first.document?.data?.confirmation_token ?? '').trim();
+    if (!token) return first.document;
+    const confirmed = await this.#run(
+      [...args, ...extra, '--confirmation-token', token],
+      { input: body, signal: this.#signal },
+    );
+    return confirmed.document;
   }
 }
 
-/** The API returns HTML-escaped bodies; decode the common entities. */
-function decodeEntities(value) {
-  return String(value ?? '')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&amp;/gi, '&');
-}
+assertTransport(AgentMailTransport.prototype, 'AgentMailTransport');
 
-/** Message ids travel with angle brackets; the API path does not use them. */
-function stripBrackets(value) {
-  return String(value ?? '').replace(/^<|>$/g, '');
+/**
+ * Build a transport whose CLI calls are supplied by the caller.
+ *
+ * Tests need to drive list/read/send without the real binary; production
+ * constructs `AgentMailTransport` directly.
+ */
+export function createAgentMailTransportForTests({ config, runCliImpl }) {
+  const transport = new AgentMailTransport({ config });
+  transport.__setRunCliForTests(runCliImpl);
+  return transport;
 }
