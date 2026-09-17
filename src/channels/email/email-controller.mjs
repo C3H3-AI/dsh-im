@@ -87,6 +87,11 @@ export class EmailController {
     if (this.#closed) return this.status();
     for (const config of this.#configStore.list()) {
       await this.#withBotTransition(config.botId, async () => {
+        // initialize() runs on every supervisor health check. Without this
+        // guard each check tore down the running runtime and started a new
+        // one, so its poll loop never completed a single pass and no mail was
+        // ever read.
+        if (this.#runtimes.get(config.botId)?.status?.ready) return;
         try {
           const secrets = await this.#resolveSecrets(config);
           if (!secrets) return;

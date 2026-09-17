@@ -511,3 +511,45 @@ test('the mailbox answers its own hand-written mail without looping', async () =
   }), { address: BOT, state });
   assert.equal(reply, null, 'our own automatic reply must not be processed again');
 });
+
+test('re-initializing does not tear down a running mailbox runtime', async () => {
+  // initialize() runs on every supervisor health check. Rebuilding the runtime
+  // each time reset its poll loop before a pass could finish, so no mail was
+  // ever read and the mailbox looked connected but silent.
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-reinit-'));
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    await store.save({
+      platformId: 'bot@qq.com', name: 'bot@qq.com', provider: 'qq',
+      allowedSenders: ['boss@example.com'],
+    });
+    const [bot] = store.list();
+    let started = 0;
+    let stopped = 0;
+    const controller = new EmailController({
+      credentials: {
+        async resolve() { return { value: JSON.stringify({ address: 'bot@qq.com', password: 'p' }) }; },
+        async set() {}, async unset() {},
+      },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      createRuntime: async () => ({
+        start: async () => { started += 1; },
+        stop: async () => { stopped += 1; },
+        status: { ready: true, connectionState: 'connected' },
+      }),
+    });
+    await controller.initialize();
+    assert.equal(started, 1, 'the first initialize starts the runtime');
+    // Three more health checks must reuse it.
+    await controller.initialize();
+    await controller.initialize();
+    await controller.initialize();
+    assert.equal(started, 1, 'later health checks must not restart a running runtime');
+    assert.equal(stopped, 0, 'a healthy runtime must not be stopped by a health check');
+    assert.deepEqual(controller.status().totals, { configured: 1, connected: 1 });
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
