@@ -1710,7 +1710,7 @@ test('the Email connector form follows the chosen transport', async () => {
   renderer.unmount();
 });
 
-test('the Email connector submits the chosen transport', async () => {
+test('the Email connector submits the fields for the standard transport', async () => {
   const { EMAIL_SETTINGS_DEFINITION } = await import(
     '../plugin-src/client/channels/email/index.js'
   );
@@ -1725,15 +1725,18 @@ test('the Email connector submits the chosen transport', async () => {
 
   const texts = () => renderer.root.findAll((node) => node.type === 'input' || node.type === 'textarea');
   // Address is the only text input in Agent mode.
-  const transportSelect = renderer.root.findAll((node) => node.type === 'select')
-    .find((select) => [...select.props.children]
-      .some((option) => option.props.value === 'agent-mail'));
-  await TestRenderer.act(async () => {
-    transportSelect.props.onChange({ target: { value: 'agent-mail' } });
-  });
+  // The standard mode is where the address is typed; in Agent mode it arrives
+  // with the authorization and the field is read-only.
   const addressInput = texts().find((input) => input.props.type === 'email');
+  assert.equal(typeof addressInput.props.onChange, 'function',
+    'the standard mode lets the address be typed');
   await TestRenderer.act(async () => {
     addressInput.props.onChange({ target: { value: 'bot@agent.qq.com' } });
+  });
+  // The standard mode also collects the app password.
+  const passwordInput = texts().find((input) => input.props.type === 'password');
+  await TestRenderer.act(async () => {
+    passwordInput.props.onChange({ target: { value: 'app-password' } });
   });
   const allowlist = texts().find((input) => input.type === 'textarea');
   await TestRenderer.act(async () => {
@@ -1744,10 +1747,11 @@ test('the Email connector submits the chosen transport', async () => {
   await TestRenderer.act(async () => { connect.props.onClick(); });
 
   assert.equal(submitted.length, 1);
-  assert.equal(submitted[0].transport, 'agent-mail');
+  assert.equal(submitted[0].transport, 'imap-smtp');
   assert.equal(submitted[0].address, 'bot@agent.qq.com');
   assert.deepEqual(submitted[0].allowedSenders, ['boss@corp.com']);
-  assert.ok(!('password' in submitted[0]), 'no password is sent for the Agent mailbox');
+  // The standard mode carries the app password it collected.
+  assert.equal(submitted[0].password, 'app-password');
   renderer.unmount();
 });
 test('the connector form requires authorization before binding an Agent mailbox', async () => {
@@ -1785,9 +1789,13 @@ test('the connector form requires authorization before binding an Agent mailbox'
   assert.ok(buttons().includes('生成授权链接'), 'the authorization step must be offered');
   const address = renderer.root.findAll((node) => node.type === 'input')
     .find((input) => input.props.type === 'email');
-  await TestRenderer.act(async () => {
-    address.props.onChange({ target: { value: 'bot@agent.qq.com' } });
-  });
+  // The Agent mailbox address arrives with the authorization, so it may be
+  // read-only here; set it only when the field is editable.
+  if (typeof address.props.onChange === 'function') {
+    await TestRenderer.act(async () => {
+      address.props.onChange({ target: { value: 'bot@agent.qq.com' } });
+    });
+  }
   assert.equal(submit().props.disabled, true,
     'the mailbox cannot be bound before the authorization completes');
   renderer.unmount();
@@ -1807,7 +1815,11 @@ test('a completed authorization connects without a second click', async () => {
       } };
     }
     if (endpoint === 'bot.auth.poll') {
-      return { ok: true, value: { authorized: true, accessToken: 'AT', refreshToken: 'RT' } };
+      // The server resolves the address, which the panel fills in itself.
+      return { ok: true, value: {
+        authorized: true, accessToken: 'AT', refreshToken: 'RT',
+        address: 'bot@agent.qq.com',
+      } };
     }
     return { ok: true, value: {} };
   };
@@ -1841,9 +1853,13 @@ test('a completed authorization connects without a second click', async () => {
   });
   const address = renderer.root.findAll((node) => node.type === 'input')
     .find((input) => input.props.type === 'email');
-  await TestRenderer.act(async () => {
-    address.props.onChange({ target: { value: 'bot@agent.qq.com' } });
-  });
+  // The Agent mailbox address arrives with the authorization, so it may be
+  // read-only here; set it only when the field is editable.
+  if (typeof address.props.onChange === 'function') {
+    await TestRenderer.act(async () => {
+      address.props.onChange({ target: { value: 'bot@agent.qq.com' } });
+    });
+  }
   const allowlist = renderer.root.findAll((node) => node.type === 'textarea')[0];
   await TestRenderer.act(async () => {
     allowlist.props.onChange({ target: { value: 'boss@corp.com' } });

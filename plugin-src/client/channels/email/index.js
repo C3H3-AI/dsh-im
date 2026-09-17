@@ -113,6 +113,9 @@ function AgentMailAuth({ rpcCall, endpoints, disabled, onAuthorized, onError, bl
             transport: 'agent-mail',
             accessToken: result.accessToken,
             refreshToken: result.refreshToken,
+            // The server resolves the mailbox address; carry it through or the
+            // field stays empty and the bind has nothing to use.
+            ...(result.address ? { address: result.address } : {}),
           });
         }
       } catch (pollError) {
@@ -224,8 +227,15 @@ function MailboxPanel({ busy, error, onSubmit, onCancel, rpcCall, endpoints }) {
     const senders = allowedSenders.split(/[\s,;，；]+/).map((v) => v.trim()).filter(Boolean);
     // The allowlist is required; ask for it rather than failing the bind.
     if (senders.length === 0) return;
-    submit(autoBind);
+    // Consume the pending bind first so a re-render cannot submit twice.
     setAutoBind(null);
+    onSubmit({
+      // The server-resolved address is used when the field is still empty.
+      address: (address.trim() || autoBind.address || ''),
+      transport: transport.key,
+      ...(isAgentMail ? { ...autoBind } : {}),
+      allowedSenders: senders,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoBind, address, allowedSenders, busy]);
 
