@@ -1177,3 +1177,49 @@ test('the client keeps the transport field from the host snapshot', async () => 
   });
   assert.equal(snapshot.bots[0].transport, 'agent-mail');
 });
+
+test('the Agent mailbox replies by the API id, not the RFC Message-ID', async () => {
+  // The reply endpoint addresses a message by the API's own id. Sending the
+  // RFC Message-ID made the path carry an "@" (encoded, or a bracket stripped
+  // into the wrong id), so a reply could miss the thread it belonged to.
+  const { AgentMailTransport } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(String(url).replace('https://api.agent.qq.com', ''));
+    const reply = (data) => ({
+      ok: true, status: 200, text: async () => JSON.stringify(data), json: async () => data,
+    });
+    if (String(url).includes('/v1/me')) {
+      return reply({ data: { aliases: [{ alias_id: 'A1', email: 'b@a.qq.com', is_primary: true }] } });
+    }
+    return reply({ data: { id: 'sent-1' } });
+  };
+  const transport = new AgentMailTransport({
+    config: { address: 'b@a.qq.com', accessToken: 'x' }, fetchImpl,
+  });
+
+  await transport.sendReply({
+    to: 'a@x.com', subject: 'Re', text: 'hi',
+    inReplyTo: '<abc@qq.com>', transportMessageId: 'msg_api_123',
+  });
+  assert.ok(
+    calls.some((call) => call.includes('/messages/msg_api_123/reply')),
+    'the API id is used for the reply path',
+  );
+  assert.ok(
+    !calls.some((call) => call.includes('%40')),
+    'the RFC Message-ID must not leak into the path',
+  );
+});
+
+test('the reply target carries both ids', () => {
+  // A transport that addresses messages by its own id needs it; one that only
+  // needs the RFC header ignores it.
+  const state = new EmailStateStore(join(tmpdir(), 'unused-email-bothids.json'));
+  const message = normalizeEmail(parsedMail(), { address: BOT, state });
+  assert.equal(message.replyTarget.messageId, '<m1@mail.example>');
+  assert.ok('transportMessageId' in message.replyTarget,
+    'the transport id travels alongside the RFC one');
+});

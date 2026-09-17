@@ -305,12 +305,18 @@ export class AgentMailTransport {
       .filter((message) => !allowed || allowed.has(normalizeAddress(message.from?.value?.[0]?.address)));
   }
 
-  async sendReply({ to, subject, text, inReplyTo, references, attachments = [] } = {}) {
+  async sendReply({
+    to, subject, text, inReplyTo, transportMessageId, references, attachments = [],
+  } = {}) {
     const aliasId = await this.#requireAlias();
-    const messageId = parseMessageIds(inReplyTo)[0];
+    // The reply endpoint addresses the message by the API's own id, not the RFC
+    // Message-ID header. A transport id is preferred; the RFC one is only a
+    // fallback for a runtime that did not supply it.
+    const apiId = String(transportMessageId ?? '').trim()
+      || stripBrackets(parseMessageIds(inReplyTo)[0] ?? '');
     // A reply inside a known thread uses the reply endpoint so the server keeps
     // the conversation headers; otherwise it is a fresh message.
-    if (messageId) {
+    if (apiId) {
       const payload = {
         body: String(text ?? ''),
         body_format: 'PLAIN',
@@ -318,7 +324,7 @@ export class AgentMailTransport {
         ...(attachments.length ? { attachments: await this.#encodeAttachments(attachments) } : {}),
       };
       const sent = await this.#sendWithConfirmation(
-        `/v1/aliases/${aliasId}/messages/${encodeURIComponent(stripBrackets(messageId))}/reply`,
+        `/v1/aliases/${aliasId}/messages/${encodeURIComponent(apiId)}/reply`,
         payload,
       );
       return { sent: true, messageId: sent?.data?.id ?? null };

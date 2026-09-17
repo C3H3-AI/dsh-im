@@ -156,6 +156,10 @@ export function normalizeEmail(parsed, { address, state } = {}) {
       to: from,
       subject: replySubject(subject),
       messageId,
+      // Some transports address a message by their own id rather than the RFC
+      // one (the Agent mailbox replies through /messages/{id}); carrying both
+      // lets each transport use what it needs.
+      transportMessageId: parsed?.uid ?? null,
       references: [...references, ...inReplyTo, messageId].slice(-10),
     },
     connectionTestTarget: { to: from, subject: 'DSH 连接测试' },
@@ -183,6 +187,7 @@ class EmailBotClient {
       subject: target.subject,
       text,
       inReplyTo: target.messageId,
+      transportMessageId: target.transportMessageId,
       references: target.references,
     });
   }
@@ -212,6 +217,7 @@ class EmailBotClient {
       subject: target?.subject,
       text: '',
       inReplyTo: target?.messageId,
+      transportMessageId: target?.transportMessageId,
       references: target?.references,
       attachments: [this.#attachmentFrom(file, 'attachment')],
     });
@@ -223,6 +229,7 @@ class EmailBotClient {
       subject: target?.subject,
       text: '',
       inReplyTo: target?.messageId,
+      transportMessageId: target?.transportMessageId,
       references: target?.references,
       attachments: [this.#attachmentFrom(image, 'image')],
     });
