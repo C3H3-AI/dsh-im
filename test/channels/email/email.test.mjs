@@ -623,3 +623,189 @@ test('an incomplete transport is rejected at the boundary', async () => {
   const complete = Object.fromEntries(TRANSPORT_METHODS.map((m) => [m, () => {}]));
   assert.equal(assertTransport(complete), complete);
 });
+
+/** A fake agent.qq.com that records calls and serves scripted responses. */
+function fakeAgentMail({ responses = [], tokens = { access: 'tok-1', refresh: 'ref-1' } } = {}) {
+  const calls = [];
+  const queue = [...responses];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url: url.replace(/^https:\/\/api\.agent\.qq\.com/, ''), method: options.method ?? 'GET' });
+    // Reuse the last script once exhausted: a listing walks several pages, and
+    // every page should get the same answer.
+    const scripted = queue.length > 1 ? queue.shift() : queue[0];
+    if (scripted) return scripted(url, options);
+    if (url.includes('/v1/me')) {
+      return jsonResponse({ data: { aliases: [
+        { alias_id: 'ALIAS1', email: 'bot@agent.qq.com', is_primary: true },
+      ] } });
+    }
+    return jsonResponse({ data: [] });
+  };
+  return { calls, fetchImpl, tokens };
+}
+
+function jsonResponse(data, status = 200) {
+  return {
+    ok: status < 400,
+    status,
+    text: async () => JSON.stringify(data),
+    json: async () => data,
+  };
+}
+
+test('the agent mailbox transport speaks the documented protocol', async () => {
+  const { AgentMailTransport } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const { fetchImpl, calls } = fakeAgentMail({
+    responses: [
+      // The alias lookup and the listing are dispatched by URL, not by order.
+      (url) => (url.includes('/v1/me')
+        ? jsonResponse({ data: { aliases: [{ alias_id: 'ALIAS1', email: 'bot@agent.qq.com', is_primary: true }] } })
+        : jsonResponse({ data: [{
+          id: 'msg-1', message_id: '<m1@agent.qq.com>', subject: '测试',
+          from: { email: 'Boss@Corp.com', name: '老板' },
+          to: [{ email: 'bot@agent.qq.com' }], body: '正文',
+          headers: { 'auto-submitted': 'no' },
+        }], pagination: {} })),
+      (url) => (url.includes('/v1/me')
+        ? jsonResponse({ data: { aliases: [{ alias_id: 'ALIAS1', email: 'bot@agent.qq.com', is_primary: true }] } })
+        : jsonResponse({ data: [{
+          id: 'msg-1', message_id: '<m1@agent.qq.com>', subject: '测试',
+          from: { email: 'Boss@Corp.com', name: '老板' },
+          to: [{ email: 'bot@agent.qq.com' }], body: '正文',
+          headers: { 'auto-submitted': 'no' },
+        }], pagination: {} })),
+    ],
+  });
+  const transport = new AgentMailTransport({
+    config: { address: 'bot@agent.qq.com', accessToken: 'tok-1' }, fetchImpl,
+  });
+
+  const messages = await transport.listMessages({ afterUid: null, limit: 5 });
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].uid, 'msg-1');
+  assert.equal(messages[0].from.value[0].address, 'boss@corp.com');
+  assert.equal(messages[0].subject, '测试');
+  // The runtime reads the RFC 3834 marker through this accessor.
+  assert.equal(messages[0].headers.get('auto-submitted'), 'no');
+  assert.deepEqual(calls.map((c) => c.url), [
+    '/v1/me',
+    '/v1/aliases/ALIAS1/messages?limit=25&dir=inbox',
+  ]);
+});
+
+test('the agent mailbox filters senders before reading a body', async () => {
+  const { AgentMailTransport } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const { fetchImpl, calls } = fakeAgentMail({
+    responses: [
+      () => jsonResponse({ data: { aliases: [{ alias_id: 'A1', email: 'bot@agent.qq.com', is_primary: true }] } }),
+      () => jsonResponse({ data: [
+        { id: 'msg-keep', from: { email: 'boss@corp.com' }, body: 'keep' },
+        { id: 'msg-drop', from: { email: 'stranger@evil.com' }, body: 'drop' },
+      ], pagination: {} }),
+    ],
+  });
+  const transport = new AgentMailTransport({
+    config: { address: 'bot@agent.qq.com', accessToken: 'tok' }, fetchImpl,
+  });
+  const messages = await transport.listMessages({
+    afterUid: null, limit: 5, allowSenders: new Set(['boss@corp.com']),
+  });
+  assert.deepEqual(messages.map((m) => m.uid), ['msg-keep']);
+  // Only the listing is fetched; no per-message read is issued.
+  assert.equal(calls.filter((c) => /\/messages\/[^?]/.test(c.url)).length, 0);
+});
+
+test('the agent mailbox refreshes a rotated token and persists it', async () => {
+  const { AgentMailTransport } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const persisted = [];
+  let listAttempts = 0;
+  const fetchImpl = async (url, options = {}) => {
+    if (url.includes('/oauth/token')) {
+      // The server rotates the refresh token; it must be handed back.
+      return jsonResponse({ access_token: 'tok-2', refresh_token: 'ref-2' });
+    }
+    if (url.includes('/v1/me')) {
+      return jsonResponse({ data: { aliases: [{ alias_id: 'A1', email: 'bot@agent.qq.com', is_primary: true }] } });
+    }
+    listAttempts += 1;
+    // The first attempt is unauthorized; the retry must carry the new token.
+    if (listAttempts === 1) return jsonResponse({ error: { code: 'UNAUTHORIZED' } }, 401);
+    assert.equal(options.headers.authorization, 'Bearer tok-2');
+    return jsonResponse({ data: [], pagination: {} });
+  };
+  const transport = new AgentMailTransport({
+    config: { address: 'bot@agent.qq.com', accessToken: 'stale', refreshToken: 'ref-1' },
+    fetchImpl,
+    onTokensRefreshed: async (tokens) => { persisted.push(tokens); },
+  });
+  await transport.listMessages({ afterUid: null, limit: 5 });
+  assert.deepEqual(persisted, [{ accessToken: 'tok-2', refreshToken: 'ref-2' }],
+    'a rotated refresh token must be persisted or the next refresh fails');
+});
+
+test('the agent mailbox completes a send that requires confirmation', async () => {
+  const { AgentMailTransport } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const bodies = [];
+  const fetchImpl = async (url, options = {}) => {
+    if (url.includes('/v1/me')) {
+      return jsonResponse({ data: { aliases: [{ alias_id: 'A1', email: 'bot@agent.qq.com', is_primary: true }] } });
+    }
+    const body = JSON.parse(options.body ?? '{}');
+    bodies.push(body);
+    if (bodies.length === 1) {
+      // The protocol answers the first send with a confirmation challenge.
+      return jsonResponse({
+        error: { code: 'CONFIRMATION_REQUIRED', details: { confirmation_token: 'cfm-1' } },
+      }, 400);
+    }
+    return jsonResponse({ data: { id: 'sent-1' } });
+  };
+  const transport = new AgentMailTransport({
+    config: { address: 'bot@agent.qq.com', accessToken: 'tok' }, fetchImpl,
+  });
+  const result = await transport.sendText({ to: 'boss@corp.com', subject: 'hi', text: 'body' });
+  assert.equal(result.sent, true);
+  assert.equal(bodies.length, 2, 'the send is retried with the confirmation token');
+  assert.equal(bodies[1].confirmation_token, 'cfm-1');
+});
+
+test('the device flow exposes a URL to scan and reports authorization', async () => {
+  const { startAgentMailDeviceFlow, pollAgentMailDeviceFlow } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const started = await startAgentMailDeviceFlow({
+    fetchImpl: async (url) => {
+      assert.match(url, /auth\.agent\.qq\.com\/oauth\/device\?func=1$/);
+      return jsonResponse({
+        poll_url: 'https://auth.agent.qq.com/poll/xyz',
+        browser_url: 'https://agent.qq.com/authorize?code=abc',
+        input_code: 'ABCD',
+      });
+    },
+  });
+  assert.equal(started.pollUrl, 'https://auth.agent.qq.com/poll/xyz');
+  assert.equal(started.inputCode, 'ABCD');
+
+  const pending = await pollAgentMailDeviceFlow({
+    pollUrl: started.pollUrl,
+    fetchImpl: async () => jsonResponse({ status: 'pending' }),
+  });
+  assert.equal(pending.status, 'pending');
+  assert.equal(pending.tokens, null);
+
+  const done = await pollAgentMailDeviceFlow({
+    pollUrl: started.pollUrl,
+    fetchImpl: async () => jsonResponse({
+      status: 'authorized', access_token: 'tok', refresh_token: 'ref',
+    }),
+  });
+  assert.deepEqual(done.tokens, { accessToken: 'tok', refreshToken: 'ref' });
+});

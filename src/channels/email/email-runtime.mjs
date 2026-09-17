@@ -350,7 +350,12 @@ export class EmailRuntime {
         // few older messages are filtered by the sender allowlist and the
         // seen-message set, so the window cannot re-drive old requests.
         const tip = await api.latestUid();
-        await this.#state.setCursor(Math.max(0, tip - FIRST_CONNECT_WINDOW));
+        // IMAP numbers messages, so a small window can be stepped back to pick
+        // up mail that arrived during startup. An opaque string cursor has no
+        // ordering to step back through, so it starts at the tip.
+        await this.#state.setCursor(
+          Number.isSafeInteger(tip) ? Math.max(0, tip - FIRST_CONNECT_WINDOW) : tip,
+        );
       }
       const client = new EmailBotClient(api, this.#abortController.signal);
       this.#bridge = new EmailHarnessBridge({
@@ -410,7 +415,9 @@ export class EmailRuntime {
       );
       const messages = await this.#api.listMessages({ afterUid: cursor, limit: 25, allowSenders });
       for (const parsed of messages) {
-        const uid = Number(parsed?.uid);
+        // Transports address messages by an integer UID (IMAP) or an opaque
+        // string id (Agent mailbox); the cursor follows whichever it is.
+        const uid = parsed?.uid;
         const message = normalizeEmail(parsed, { address: this.#config.platformId, state: this.#state });
         if (message) {
           // Remember the thread chain before the turn runs so a reply that
@@ -420,7 +427,9 @@ export class EmailRuntime {
           }
           await this.#bridge.accept(message);
         }
-        if (Number.isSafeInteger(uid) && uid > cursor) await this.#state.setCursor(uid);
+        if (uid !== undefined && uid !== null && uid !== '' && uid !== cursor) {
+          await this.#state.setCursor(uid);
+        }
       }
       this.#status.lastCheckedAt = Date.now();
       this.#status.lastError = null;

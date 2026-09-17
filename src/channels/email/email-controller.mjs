@@ -5,6 +5,7 @@ import {
 } from '../shared/access-policy.mjs';
 import { assertTransport } from './transport.mjs';
 import { ImapSmtpTransport } from './transports/imap-smtp.mjs';
+import { AgentMailTransport } from './transports/agent-mail.mjs';
 import {
   DEFAULT_EMAIL_TRANSPORT,
   EMAIL_TRANSPORTS,
@@ -56,7 +57,10 @@ export class EmailController {
     logger = console,
     // Transport implementations by key. A new mail protocol is a new entry
     // here, not another channel.
-    transports = { 'imap-smtp': (options) => new ImapSmtpTransport(options) },
+    transports = {
+      'imap-smtp': (options) => new ImapSmtpTransport(options),
+      'agent-mail': (options) => new AgentMailTransport(options),
+    },
     // Host-owned hook: the mailbox allowlist and the Harness access policy are
     // two separate stores, so a changed allowlist must be pushed into the
     // policy or the channel keeps rejecting the new senders.

@@ -88,6 +88,28 @@ export class EmailStateStore extends ConversationStateStore {
   }
 
   /**
+   * Mail cursors are not always numbers: IMAP addresses messages by an integer
+   * UID, while the Agent mailbox pages by an opaque string id. The shared store
+   * only accepts integers, so the mailbox keeps its own cursor and returns it
+   * through the inherited accessor.
+   */
+  cursor() {
+    const value = this.extensionState().mailCursor;
+    return value === undefined ? null : value;
+  }
+
+  async setCursor(cursor) {
+    if (typeof cursor !== 'string' && !Number.isSafeInteger(cursor)) {
+      throw new TypeError('Invalid update cursor');
+    }
+    if (typeof cursor === 'string' && cursor === '') {
+      throw new TypeError('Invalid update cursor');
+    }
+    this.extensionState().mailCursor = cursor;
+    await this.persist();
+  }
+
+  /**
    * A bound conversation key maps straight to the pinned session. Without this,
    * the resolver would miss the mapping and create a brand-new session even
    * though the user asked for a fixed one. The bridge prefixes the key with the
