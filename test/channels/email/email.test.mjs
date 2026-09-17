@@ -683,7 +683,10 @@ test('a mailbox is displayed under its own address, not a generic label', async 
       },
       configStore: store,
       logger: { warn() {}, info() {}, error() {}, log() {} },
-      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
+      transports: {
+        'imap-smtp': makeStubTransport,
+        'agent-mail': makeStubTransport,
+      },
       createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
     });
     const [bot] = controller.status().bots;
@@ -712,7 +715,10 @@ test('an Agent mailbox without a stored name still shows its address', async () 
       },
       configStore: store,
       logger: { warn() {}, info() {}, error() {}, log() {} },
-      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
+      transports: {
+        'imap-smtp': makeStubTransport,
+        'agent-mail': makeStubTransport,
+      },
       createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
     });
     const [bot] = controller.status().bots;
@@ -745,7 +751,10 @@ test('the status reports which transport a mailbox uses', async () => {
       credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
       configStore: store,
       logger: { warn() {}, info() {}, error() {}, log() {} },
-      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
+      transports: {
+        'imap-smtp': makeStubTransport,
+        'agent-mail': makeStubTransport,
+      },
       createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
     });
     const byAddress = Object.fromEntries(
@@ -772,7 +781,10 @@ test('a mailbox can switch transport', async () => {
       credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
       configStore: store,
       logger: { warn() {}, info() {}, error() {}, log() {} },
-      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
+      transports: {
+        'imap-smtp': makeStubTransport,
+        'agent-mail': makeStubTransport,
+      },
       createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
     });
     await controller.updateMailboxSettings(bot.botId, { transport: 'agent-mail' });
@@ -1252,7 +1264,10 @@ test('the Agent mailbox needs no credential of its own', async () => {
       },
       configStore: store,
       logger: { warn() {}, info() {}, error() {}, log() {} },
-      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
+      transports: {
+        'imap-smtp': makeStubTransport,
+        'agent-mail': makeStubTransport,
+      },
       createRuntime: async ({ config, credential }) => {
         started.push({ config, credential });
         return { start: async () => {}, stop: async () => {}, status: { ready: true, connectionState: 'connected' } };
@@ -1289,6 +1304,88 @@ test('the runtime starts an Agent mailbox that carries no token', async () => {
     await runtime.start();
     assert.equal(runtime.status.ready, true, 'the mailbox starts without a token');
     await runtime.stop();
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+/** A transport that satisfies the contract and does nothing. */
+function makeStubTransport() {
+  return {
+    connect: async () => {}, disconnect: async () => {}, latestUid: async () => 0,
+    listMessages: async () => [], sendReply: async () => {}, sendText: async () => {},
+  };
+}
+
+test('a mailbox can be connected before any sender is authorized', async () => {
+  // Connecting first and authorizing senders later is the smoother path; the
+  // policy derived from an empty allowlist admits nobody, so it stays
+  // fail-closed and the mailbox cannot be driven yet.
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-emptyallow-'));
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    const started = [];
+    const controller = new EmailController({
+      credentials: {
+        async resolve() { return null; }, async set() {}, async unset() {},
+      },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: {
+        'imap-smtp': makeStubTransport,
+        'agent-mail': makeStubTransport,
+      },
+      createRuntime: async ({ config }) => {
+        started.push(config);
+        return { start: async () => {}, stop: async () => {}, status: { ready: true, connectionState: 'connected' } };
+      },
+    });
+    const status = await controller.bindMailbox({
+      address: 'bot@agent.qq.com', transport: 'agent-mail', allowedSenders: [],
+    });
+    assert.equal(started.length, 1, 'the mailbox binds without an allowlist');
+    assert.deepEqual(started[0].allowedSenders, []);
+    assert.equal(status.bots[0].state, 'connected');
+
+    // The policy is still fail-closed: nobody is admitted yet.
+    const [bot] = store.list();
+    assert.deepEqual(bot.allowedSenders, []);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('each agent mailbox authorizes in its own CLI workspace', async () => {
+  // The CLI isolates accounts per workspace. Sharing one made every Agent
+  // mailbox read whichever account authorized first.
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-ws-'));
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    const controller = new EmailController({
+      credentials: {
+        async resolve() { return null; }, async set() {}, async unset() {},
+      },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: {
+        'imap-smtp': makeStubTransport,
+        'agent-mail': makeStubTransport,
+      },
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+      // Stand in for the CLI-backed authorization.
+      startAuthorizationImpl: null,
+    });
+    const seen = [];
+    controller.startAuthorization = async (options) => {
+      seen.push(options?.workspace);
+      return { transport: 'agent-mail', browserUrl: 'https://x', expiresAt: Date.now() + 600_000 };
+    };
+    await controller.startAuthorization({ transport: 'agent-mail', workspace: 'a@agent.qq.com' });
+    await controller.startAuthorization({ transport: 'agent-mail', workspace: 'b@agent.qq.com' });
+    assert.deepEqual(seen, ['a@agent.qq.com', 'b@agent.qq.com'],
+      'each mailbox carries its own workspace into authorization');
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }

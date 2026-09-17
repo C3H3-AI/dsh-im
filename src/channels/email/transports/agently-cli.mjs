@@ -85,14 +85,14 @@ export function isCliAvailable() {
  * running rather than waited on; the caller polls `auth status` to observe the
  * outcome, and the process exits on its own once the scan lands or it expires.
  */
-export function startCliLogin({ signal, timeoutMs = 30_000, env = {} } = {}) {
+export function startCliLogin({ signal, timeoutMs = 30_000, env = {}, workspace } = {}) {
   const { command } = resolveCliBinary();
   return new Promise((resolve, reject) => {
     let child;
     try {
       child = spawn(command, ['auth', 'login'], {
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, ...env },
+        env: { ...process.env, ...cliEnv(workspace), ...env },
       });
     } catch (error) {
       reject(new AgentMailCliError(`unable to launch agently-cli: ${error.message}`, {
@@ -163,6 +163,17 @@ export function startCliLogin({ signal, timeoutMs = 30_000, env = {} } = {}) {
  * `input` is written to stdin, which is how a body avoids both the argument
  * list and the shell.
  */
+/**
+ * The environment a CLI call runs with.
+ *
+ * The CLI isolates accounts by workspace, so a mailbox is addressed by its own
+ * workspace name. Without this every Agent mailbox shared one login and the
+ * second one always read the first one's account.
+ */
+export function cliEnv(workspace) {
+  return workspace ? { AGENTLY_WORKSPACE: String(workspace) } : {};
+}
+
 export function runCli(args, {
   input = null, timeoutMs = DEFAULT_TIMEOUT_MS, signal, env = {},
 } = {}) {

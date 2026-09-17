@@ -74,7 +74,7 @@ const SESSION_REFRESH_MS = 15_000;
  * WeChat QR, so the user opens this URL (or scans it) and signs in there. The
  * page is polled until the server reports the authorization.
  */
-function AgentMailAuth({ rpcCall, endpoints, disabled, onAuthorized, onError, blocked = false }) {
+function AgentMailAuth({ rpcCall, endpoints, disabled, address = '', onAuthorized, onError, blocked = false }) {
   const [session, setSession] = React.useState(null);
   const [status, setStatus] = React.useState('idle');
   const [error, setError] = React.useState(null);
@@ -92,7 +92,13 @@ function AgentMailAuth({ rpcCall, endpoints, disabled, onAuthorized, onError, bl
     setError(null);
     setStatus('starting');
     try {
-      const started = await invoke(endpoints.startAuth, { transport: 'agent-mail' });
+      // The CLI isolates accounts per workspace, so the address being added
+      // becomes its workspace — otherwise every Agent mailbox shares the first
+      // login and shows that account's address.
+      const started = await invoke(endpoints.startAuth, {
+        transport: 'agent-mail',
+        ...(address.trim() ? { workspace: address.trim().toLowerCase() } : {}),
+      });
       setSession(started);
       setStatus('waiting');
     } catch (startError) {
@@ -228,8 +234,8 @@ function MailboxPanel({ busy, error, onSubmit, onCancel, rpcCall, endpoints }) {
     // The address may have arrived with the authorization.
     if (!address.trim() && !autoBind.address) return;
     const senders = allowedSenders.split(/[\s,;，；]+/).map((v) => v.trim()).filter(Boolean);
-    // The allowlist is required; ask for it rather than failing the bind.
-    if (senders.length === 0) return;
+    // An empty allowlist is allowed: the mailbox connects first and senders are
+    // authorized later. It stays fail-closed, so nobody can drive it yet.
     // Consume the pending bind first so a re-render cannot submit twice.
     setAutoBind(null);
     onSubmit({
@@ -296,6 +302,8 @@ function MailboxPanel({ busy, error, onSubmit, onCancel, rpcCall, endpoints }) {
           rpcCall,
           endpoints,
           disabled: busy,
+          // The address doubles as the CLI workspace, so the component needs it.
+          address,
           // Auto-submit: the panel says "connecting", so it must actually
           // connect. Requiring a second click stranded users who had already
           // scanned, and a reload lost the token entirely.
@@ -305,8 +313,9 @@ function MailboxPanel({ busy, error, onSubmit, onCancel, rpcCall, endpoints }) {
             setTokens(granted);
             setAutoBind(granted);
           },
-          blocked: (!address.trim() && !tokens?.address)
-            || allowedSenders.split(/[\s,;，；]+/).every((value) => !value.trim()),
+          // Only the address gates authorization: the allowlist is optional now,
+          // and requiring it here made the button unclickable for a new mailbox.
+          blocked: !address.trim() && !tokens?.address,
           onError: () => setTokens(null),
         })
         : null,

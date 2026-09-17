@@ -11,6 +11,7 @@
 
 import {
   AgentMailCliError,
+  cliEnv,
   isCliAvailable,
   runCli,
   startCliLogin,
@@ -38,8 +39,8 @@ const INBOX = 'inbox';
  * completes, so the process is left running and the caller observes the outcome
  * through `agentMailAuthorizationStatus`.
  */
-export async function startAgentMailAuthorization({ signal } = {}) {
-  const started = await startCliLogin({ signal });
+export async function startAgentMailAuthorization({ signal, workspace } = {}) {
+  const started = await startCliLogin({ signal, workspace });
   return {
     browserUrl: started.browserUrl,
     inputCode: started.inputCode,
@@ -49,9 +50,9 @@ export async function startAgentMailAuthorization({ signal } = {}) {
 }
 
 /** The authorization status, as the CLI reports it. */
-export async function agentMailAuthorizationStatus({ signal } = {}) {
+export async function agentMailAuthorizationStatus({ signal, workspace } = {}) {
   try {
-    const { document } = await runCli(['auth', 'status'], { signal });
+    const { document } = await runCli(['auth', 'status'], { signal, env: cliEnv(workspace) });
     const data = document?.data ?? {};
     return {
       loggedIn: data.logged_in === true,
@@ -72,8 +73,8 @@ export async function refreshAgentMailToken({ signal } = {}) {
 }
 
 /** The account's own address, from `+me`. */
-export async function fetchAgentMailIdentity({ signal } = {}) {
-  const { document } = await runCli(['+me'], { signal });
+export async function fetchAgentMailIdentity({ signal, workspace } = {}) {
+  const { document } = await runCli(['+me'], { signal, env: cliEnv(workspace) });
   const aliases = Array.isArray(document?.data?.aliases) ? document.data.aliases : [];
   const primary = aliases.find((entry) => entry?.is_primary) ?? aliases[0];
   const address = normalizeAddress(primary?.email);
@@ -126,10 +127,22 @@ export class AgentMailTransport {
   #address = '';
   // Indirection so tests can drive the protocol without the real binary.
   #run = runCli;
+  #workspace = '';
 
   /** Test seam: swap the CLI runner. Not part of the transport contract. */
   __setRunCliForTests(impl) {
     if (typeof impl === 'function') this.#run = impl;
+  }
+
+  /**
+   * Call the CLI in this mailbox's workspace.
+   *
+   * The CLI separates accounts per workspace, so every call must carry it —
+   * otherwise two Agent mailboxes share one login and both read the first
+   * account.
+   */
+  #call(args, options = {}) {
+    return this.#run(args, { ...options, env: { ...cliEnv(this.#workspace), ...(options.env ?? {}) } });
   }
 
   constructor({ config, signal } = {}) {
@@ -145,6 +158,9 @@ export class AgentMailTransport {
     this.#config = config;
     this.#signal = signal;
     this.#address = normalizeAddress(config.address);
+    // Stable per-mailbox workspace derived from the address, so a login is
+    // never shared between two mailboxes.
+    this.#workspace = String(config.workspace ?? config.platformId ?? config.address ?? '').trim();
   }
 
   get address() {
@@ -159,7 +175,7 @@ export class AgentMailTransport {
   async connect() {
     if (this.#connected) return;
     // Goes through the instance runner so tests never spawn the real binary.
-    const { document } = await this.#run(['+me'], { signal: this.#signal });
+    const { document } = await this.#call(['+me'], { signal: this.#signal });
     const aliases = Array.isArray(document?.data?.aliases) ? document.data.aliases : [];
     const primary = aliases.find((entry) => entry?.is_primary) ?? aliases[0];
     const address = normalizeAddress(primary?.email);
@@ -198,7 +214,7 @@ export class AgentMailTransport {
     for (let page = 0; page < 5; page += 1) {
       const args = ['message', '+list', '--dir', INBOX, '--limit', String(DEFAULT_PAGE_SIZE)];
       if (cursor) args.push('--cursor', cursor);
-      const { document } = await this.#run(args, { signal: this.#signal });
+      const { document } = await this.#call(args, { signal: this.#signal });
       const items = Array.isArray(document?.data?.data) ? document.data.data : [];
 
       for (const raw of items) {
@@ -237,7 +253,7 @@ export class AgentMailTransport {
     if (!summary) return null;
     if (allowed && !allowed.has(normalizeAddress(summary.from?.value?.[0]?.address))) return null;
     try {
-      const { document } = await this.#run(['message', '+read', '--id', summary.uid], {
+      const { document } = await this.#call(['message', '+read', '--id', summary.uid], {
         signal: this.#signal,
       });
       const full = normalizeAgentMailMessage(document?.data ?? {});
@@ -299,7 +315,7 @@ export class AgentMailTransport {
     for (const file of attachments) {
       const path = file?.path ?? file?.filePath;
       if (!path) continue;
-      const { document } = await this.#run(['attachment', '+upload', '--file', path], {
+      const { document } = await this.#call(['attachment', '+upload', '--file', path], {
         signal: this.#signal,
       });
       const id = String(document?.data?.attachment_id ?? '').trim();
@@ -319,10 +335,10 @@ export class AgentMailTransport {
       ? Object.entries(headers).flatMap(([name, value]) => (value === undefined || value === null
         ? [] : ['--header', `${name}: ${value}`]))
       : [];
-    const first = await this.#run([...args, ...extra], { input: body, signal: this.#signal });
+    const first = await this.#call([...args, ...extra], { input: body, signal: this.#signal });
     const token = String(first.document?.data?.confirmation_token ?? '').trim();
     if (!token) return first.document;
-    const confirmed = await this.#run(
+    const confirmed = await this.#call(
       [...args, ...extra, '--confirmation-token', token],
       { input: body, signal: this.#signal },
     );

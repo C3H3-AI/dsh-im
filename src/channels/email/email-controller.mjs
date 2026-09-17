@@ -190,11 +190,9 @@ export class EmailController {
     if (needsHosts && (!security.imapHost || !security.smtpHost)) {
       throw new TypeError(t('请选择邮箱服务商或填写 IMAP/SMTP 服务器地址'));
     }
-    if (security.allowedSenders.length === 0) {
-      // Fail closed: without an allowlist anyone who can guess the address
-      // could drive the Harness through this mailbox.
-      throw new TypeError(t('必须至少配置一个允许发件人'));
-    }
+    // An empty allowlist is allowed so a mailbox can be connected first and
+    // authorized later. It stays fail-closed: the access policy derived from an
+    // empty list admits nobody, so the mailbox can be read but not driven.
     const identity = deriveEmailBotIdentity(normalizedAddress);
     await this.#withBotTransition(identity.botId, async () => {
       const previousConfig = this.#configStore.getByPlatformId(normalizedAddress);
@@ -603,7 +601,7 @@ export class EmailController {
    * Agent mailbox authorizes by WeChat QR code rather than a password). The
    * pending device code is held until the matching poll completes it.
    */
-  async startAuthorization({ transport, hostname } = {}) {
+  async startAuthorization({ transport, hostname, workspace } = {}) {
     const key = normalizeEmailTransport(transport ?? DEFAULT_EMAIL_TRANSPORT);
     if (key !== 'agent-mail') {
       throw new TypeError(t('该接入方式不需要扫码授权'));
@@ -611,9 +609,14 @@ export class EmailController {
     // The official CLI owns the Agent mailbox protocol, including the token
     // refresh: a hand-written client was refused one (invalid_grant), so the
     // mailbox died an hour after every authorization.
-    const device = await startAgentMailAuthorization({});
+    //
+    // The CLI isolates accounts per workspace, so a mailbox authorizes into its
+    // own. Sharing one workspace made every Agent mailbox read the first
+    // account that logged in.
+    const scope = String(workspace ?? '').trim();
+    const device = await startAgentMailAuthorization({ workspace: scope });
     const expiresAt = Date.now() + (device.expiresInMs ?? AGENT_MAIL_AUTH_TTL_MS);
-    const pending = { transport: key, startedAt: Date.now(), expiresAt };
+    const pending = { transport: key, workspace: scope, startedAt: Date.now(), expiresAt };
     this.#pendingAuth = pending;
     // Persisted too: the code outlives a reload, and losing it would strand an
     // authorization the user already completed.
@@ -645,7 +648,7 @@ export class EmailController {
       await this.#storePendingAuth(null);
       throw new TypeError(t('扫码授权已超时，请重新发起'));
     }
-    const status = await agentMailAuthorizationStatus({});
+    const status = await agentMailAuthorizationStatus({ workspace: pending.workspace });
     if (!status.loggedIn) {
       return { status: status.status || 'pending', authorized: false };
     }
@@ -655,7 +658,7 @@ export class EmailController {
     // server already knows it — so it is read here rather than typed.
     let identity = null;
     try {
-      identity = await fetchAgentMailIdentity({});
+      identity = await fetchAgentMailIdentity({ workspace: pending.workspace });
     } catch (error) {
       this.#logger.warn?.('[dsh-im:email] unable to resolve the mailbox identity:', error);
     }
