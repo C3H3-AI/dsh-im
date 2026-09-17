@@ -315,7 +315,7 @@ test('polling only downloads mail from allowlisted senders', async () => {
   // never be requested, so filtering happens on the envelope before the source
   // fetch — not after the message is already downloaded.
   const source = await readFile(
-    new URL('../../../src/channels/email/email-api.mjs', import.meta.url),
+    new URL('../../../src/channels/email/transports/imap-smtp.mjs', import.meta.url),
     'utf8',
   );
   const listStart = source.indexOf('async listMessages');
@@ -490,7 +490,7 @@ test('outgoing replies carry the RFC 3834 automatic-reply marker', async () => {
   // The marker is what lets a remote bot (or this mailbox) refuse to answer an
   // automatic reply, so it must travel on every message we send.
   const source = await readFile(
-    new URL('../../../src/channels/email/email-api.mjs', import.meta.url),
+    new URL('../../../src/channels/email/transports/imap-smtp.mjs', import.meta.url),
     'utf8',
   );
   assert.match(source, /'Auto-Submitted':\s*'auto-replied'/,
