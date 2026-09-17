@@ -144,6 +144,11 @@ export function createTokenChannelSettings(definition) {
           account,
           busy: Boolean(busy),
           onSave: onAccountSettingsSave,
+          // Channels with extra settings panels (email session binding) call
+          // their own endpoints through the same RPC bridge.
+          rpcCall,
+          endpoints,
+          onChanged: loadStatus,
         }) : null,
         h('div', { className: 'ddt-accountFooter dim-cardFooter' },
           h('div', { className: 'dim-cardFooterLayout' },

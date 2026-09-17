@@ -48,5 +48,7 @@ export function createProductionController(ctx, config = {}, internals = {}) {
     // Declares that this channel keeps its allowlist in its own config and
     // pushes the derived policy into the workspace store on change.
     accessPolicyForBot: emailAccessPolicyFor,
+    // The mailbox settings page can pin the chat to an existing session.
+    supportsSessionBinding: true,
   });
 }

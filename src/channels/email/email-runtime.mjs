@@ -36,6 +36,49 @@ export function replySubject(subject) {
   return /^re:/i.test(text) ? text : `Re: ${text}`;
 }
 
+/** Format one address list (To/Cc) as a compact "Name <addr>" string. */
+function formatAddressList(value) {
+  const entries = Array.isArray(value?.value) ? value.value : [];
+  return entries
+    .map((entry) => {
+      const address = normalizeAddress(entry?.address);
+      if (!address) return null;
+      const name = String(entry?.name ?? '').trim();
+      return name ? `${name} <${address}>` : address;
+    })
+    .filter(Boolean);
+}
+
+/**
+ * Compose the text the model actually receives.
+ *
+ * Only the body used to be forwarded, so an instruction written in the subject
+ * — a natural place for one — was silently dropped, and a message that also
+ * went to other recipients looked like a private note. The subject and the
+ * recipient lists are therefore prepended as a small header, and the original
+ * body is left untouched below it.
+ */
+export function mailPromptContent({ body, subject, parsed }) {
+  const header = [];
+  const cleanSubject = String(subject ?? '').trim();
+  if (cleanSubject) header.push(`Subject: ${cleanSubject}`);
+
+  const from = formatAddressList(parsed?.from)[0];
+  if (from) header.push(`From: ${from}`);
+
+  const to = formatAddressList(parsed?.to);
+  if (to.length) header.push(`To: ${to.join(', ')}`);
+
+  const cc = formatAddressList(parsed?.cc);
+  if (cc.length) header.push(`Cc: ${cc.join(', ')}`);
+
+  const text = String(body ?? '').trim();
+  // A body-less mail (attachment only) still carries its header, so the model
+  // sees what the message was about.
+  if (header.length === 0) return text;
+  return text ? `${header.join('\n')}\n\n${text}` : header.join('\n');
+}
+
 /**
  * Turn one parsed mail into the shared bridge's inbound message shape, or null
  * when the mail must be ignored (self-sent, automated, empty body).
@@ -51,12 +94,19 @@ export function normalizeEmail(parsed, { address, state } = {}) {
 
   const references = parseMessageIds(parsed?.references);
   const inReplyTo = parseMessageIds(parsed?.inReplyTo);
-  const conversationId = resolveThreadKey({
-    messageId,
-    references,
-    inReplyTo,
-    conversationMap: state?.threadMap ?? new Map(),
-  });
+  // A fixed binding pins the conversation, so every message routed to that
+  // binding resolves to the same Harness session instead of a per-thread one.
+  // Without a binding the thread chain decides, which keeps one Harness session
+  // per mail thread.
+  const boundSession = state?.boundSessionFor?.(from) ?? null;
+  const conversationId = boundSession
+    ? `bound:${boundSession}`
+    : resolveThreadKey({
+      messageId,
+      references,
+      inReplyTo,
+      conversationMap: state?.threadMap ?? new Map(),
+    });
   const body = stripQuotedHistory(parsed?.text ?? parsed?.html ?? '');
   const attachments = Array.isArray(parsed?.attachments) ? parsed.attachments : [];
   if (!body && attachments.length === 0) return null;
@@ -71,7 +121,7 @@ export function normalizeEmail(parsed, { address, state } = {}) {
     // Email has no notion of a display name we can trust; the address is both.
     senderName: parsed?.from?.value?.[0]?.name || from,
     senderAlternateId: undefined,
-    content: body,
+    content: mailPromptContent({ body, subject, parsed }),
     plainText: typeof parsed?.text === 'string',
     images: [],
     files: attachments.map((attachment) => ({

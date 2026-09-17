@@ -17,4 +17,5 @@ export default Object.freeze({
   '邮箱通道运行正常': 'The Email channel is running normally',
   '邮箱通道尚未连接': 'The Email channel is not connected yet',
   '邮箱访问策略同步失败，请重试': 'Failed to sync the mailbox access policy; please retry',
+  '当前环境不支持会话绑定': 'Session binding is not supported in this environment',
 });

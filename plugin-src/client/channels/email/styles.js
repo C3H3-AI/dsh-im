@@ -15,6 +15,10 @@ const CSS = String.raw`
 .dim-emailField textarea { min-height: 76px; resize: vertical; }
 .dim-emailHint { font-size: 12px; color: var(--dsw-alias-label-tertiary, #8f959e); }
 .dim-emailGrid { display: grid; grid-template-columns: 1fr 120px; gap: 12px; }
+.dim-emailBinding { margin-top: 20px; border-top: 1px solid var(--dsw-alias-border, #dee0e3); padding-top: 16px; }
+.dim-emailBinding h4 { margin: 0 0 4px; font-size: 14px; }
+.dim-emailBindingRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 10px; align-items: center; }
+.dim-emailBindingSender { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 `;
 export function installEmailStyles() {
   if (typeof document === 'undefined') return () => {};

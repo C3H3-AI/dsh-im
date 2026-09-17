@@ -111,8 +111,129 @@ function MailboxPanel({ busy, error, onSubmit, onCancel }) {
       }, busy ? '正在连接邮箱…' : '连接邮箱')));
 }
 
+/**
+ * Session binding: how incoming mail maps onto Harness sessions.
+ *
+ * Three levels, highest first:
+ *   1. a per-sender binding,
+ *   2. the account-wide binding,
+ *   3. no binding — every mail thread starts its own session.
+ */
+function SessionBindingPanel({ account, rpcCall, endpoints, onChanged, disabled }) {
+  const [binding, setBinding] = React.useState(null);
+  const [sessions, setSessions] = React.useState([]);
+  const [accountSession, setAccountSession] = React.useState('');
+  const [senderRows, setSenderRows] = React.useState([]);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const [notice, setNotice] = React.useState(null);
+
+  const invoke = React.useCallback(async (endpoint, payload) => {
+    const value = await rpcCall(endpoint, payload);
+    return value;
+  }, [rpcCall]);
+
+  const load = React.useCallback(async () => {
+    if (typeof rpcCall !== 'function') return;
+    try {
+      const [current, listed] = await Promise.all([
+        invoke(endpoints.getBinding, { botId: account.botId }),
+        invoke(endpoints.listSessions, { botId: account.botId }),
+      ]);
+      setBinding(current);
+      setAccountSession(current?.account ?? '');
+      const senders = current?.senders ?? {};
+      setSenderRows((current?.knownSenders ?? []).map((address) => ({
+        address, sessionId: senders[address] ?? '',
+      })));
+      setSessions(Array.isArray(listed?.sessions) ? listed.sessions : []);
+    } catch (loadError) {
+      setError(loadError);
+    }
+  }, [account.botId, endpoints, invoke, rpcCall]);
+
+  React.useEffect(() => { void load(); }, [load]);
+
+  const persist = async (nextAccount, nextRows) => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const senders = {};
+      for (const row of nextRows) {
+        if (row?.address && row.sessionId) senders[row.address] = row.sessionId;
+      }
+      await invoke(endpoints.setBinding, {
+        botId: account.botId,
+        account: nextAccount || null,
+        senders,
+      });
+      setNotice('会话绑定已保存。');
+      await onChanged?.({ silent: true });
+    } catch (saveError) {
+      setError(saveError);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const options = (selected, placeholder) => [
+    h('option', { key: '__none', value: '' }, placeholder),
+    ...sessions.map((session) => h('option', {
+      key: session.sessionId, value: session.sessionId,
+    }, session.title ? `${session.title}（${session.sessionId}）` : session.sessionId)),
+    // Keep an unknown-but-set id selectable so loading never silently drops it.
+    ...(selected && !sessions.some((s) => s.sessionId === selected)
+      ? [h('option', { key: selected, value: selected }, selected)] : []),
+  ];
+
+  const locked = disabled || busy;
+
+  return h('section', { className: 'dim-emailPanel dim-emailBinding' },
+    h('h4', null, '会话绑定'),
+    h('p', { className: 'dim-emailHint' },
+      '不绑定则每封新邮件开启一个新会话；绑定固定会话后，来信都在该会话内继续。'),
+    h('div', { className: 'dim-emailFields' },
+      field('固定会话（账号级）', h('select', {
+        value: accountSession,
+        disabled: locked,
+        onChange: (event) => setAccountSession(event.target.value),
+      }, options(accountSession, '不绑定（每封新邮件新建会话）'))),
+      senderRows.length
+        ? h('div', { className: 'dim-emailFields' },
+          h('span', { className: 'dim-emailHint' }, '按发件人覆盖（优先于账号级）'),
+          ...senderRows.map((row, index) => h('div', { key: row.address, className: 'dim-emailBindingRow' },
+            h('span', { className: 'dim-emailBindingSender', title: row.address }, row.address),
+            h('select', {
+              value: row.sessionId,
+              disabled: locked,
+              onChange: (event) => {
+                const next = [...senderRows];
+                next[index] = { ...row, sessionId: event.target.value };
+                setSenderRows(next);
+              },
+            }, options(row.sessionId, '跟随账号级')))))
+        : h('p', { className: 'dim-emailHint' }, '尚无可覆盖的发件人（先在上方配置允许的发件人）。')),
+    error ? h('p', { className: 'dim-inlineError', role: 'alert' }, error.message ?? String(error)) : null,
+    notice ? h('p', { className: 'dim-emailHint', role: 'status' }, notice) : null,
+    h('div', { className: 'ddt-actions dim-viewActions' },
+      h('button', {
+        type: 'button', className: 'ddt-button', disabled: locked,
+        onClick: () => { void persist(accountSession, senderRows); },
+      }, busy ? '正在保存…' : '保存绑定'),
+      h('button', {
+        type: 'button', className: 'ddt-button', disabled: locked,
+        onClick: () => {
+          setAccountSession('');
+          const cleared = senderRows.map((row) => ({ ...row, sessionId: '' }));
+          setSenderRows(cleared);
+          void persist('', cleared);
+        },
+      }, '清除绑定')));
+}
+
 /** Per-account settings: edit hosts and the allowlist without reconnecting. */
-function MailboxSettings({ account, busy, error, onSave, onCancel }) {
+function MailboxSettings({ account, busy, error, onSave, onCancel, rpcCall, endpoints, onChanged }) {
   const [allowedSenders, setAllowedSenders] = React.useState(
     (account?.allowedSenders ?? []).join('\n'),
   );
@@ -131,7 +252,10 @@ function MailboxSettings({ account, busy, error, onSave, onCancel }) {
           allowedSenders: allowedSenders
             .split(/[\s,;，；]+/).map((value) => value.trim()).filter(Boolean),
         }),
-      }, busy ? '正在保存…' : '保存')));
+      }, busy ? '正在保存…' : '保存')),
+    h(SessionBindingPanel, {
+      account, rpcCall, endpoints, onChanged, disabled: busy,
+    }));
 }
 
 export const EMAIL_SETTINGS_DEFINITION = Object.freeze({

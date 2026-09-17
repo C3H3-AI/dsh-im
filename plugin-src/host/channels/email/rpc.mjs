@@ -15,8 +15,24 @@ export const EMAIL_ENDPOINTS = Object.freeze({
   setContextEnhancement: 'bot.context-enhancement.set',
   setAccessPolicy: 'bot.access-policy.set',
   setAlias: 'bot.alias.set',
+  // Session binding: read the current bindings, change them, and list the
+  // candidate sessions for the picker.
+  getBinding: 'bot.session-binding.get',
+  setBinding: 'bot.session-binding.set',
+  listSessions: 'bot.session.list',
 });
 export const EMAIL_RPC_ENDPOINTS = Object.freeze(Object.values(EMAIL_ENDPOINTS));
+
+function failure(code, error) {
+  return {
+    ok: false,
+    error: {
+      code: error?.code ?? code,
+      message: error?.message ?? String(error),
+      details: error?.details ?? {},
+    },
+  };
+}
 
 function withRpcDetails(result) {
   if (result?.ok !== false) return result;
@@ -44,6 +60,27 @@ export function createEmailRpcHandler(controller) {
             details: error?.details ?? {},
           },
         });
+      }
+    }
+    if (endpoint === EMAIL_ENDPOINTS.getBinding) {
+      try {
+        return { ok: true, value: await controller.getSessionBinding(payload?.botId) };
+      } catch (error) {
+        return failure('email-binding-failed', error);
+      }
+    }
+    if (endpoint === EMAIL_ENDPOINTS.setBinding) {
+      try {
+        return { ok: true, value: await controller.setSessionBinding(payload?.botId, payload ?? {}) };
+      } catch (error) {
+        return failure('email-binding-failed', error);
+      }
+    }
+    if (endpoint === EMAIL_ENDPOINTS.listSessions) {
+      try {
+        return { ok: true, value: await controller.listSessions(payload?.botId) };
+      } catch (error) {
+        return failure('email-sessions-failed', error);
       }
     }
     if (endpoint === EMAIL_ENDPOINTS.updateMailbox) {

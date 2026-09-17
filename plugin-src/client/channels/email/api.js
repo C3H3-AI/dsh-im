@@ -6,6 +6,10 @@ export const EMAIL_ENDPOINTS = Object.freeze({
   // The mailbox binds by address + app password rather than a single token.
   bindCredentials: 'bot.bind-mailbox',
   updateMailbox: 'bot.mailbox.update',
+  // Session binding controls (per-account settings panel).
+  getBinding: 'bot.session-binding.get',
+  setBinding: 'bot.session-binding.set',
+  listSessions: 'bot.session.list',
 });
 const api = createTokenChannelApi('Email', ' IMAP/SMTP 邮箱');
 export { api as emailClientApi };

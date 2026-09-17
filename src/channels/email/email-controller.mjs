@@ -30,6 +30,10 @@ export class EmailController {
   #createRuntime;
   #createApi;
   #syncAccessPolicy;
+  #stateFor;
+  #listWorkspaceSessions;
+  #botWorkspaceFor;
+  #defaultWorkspace;
   #deleteState;
   #logger;
   #runtimes = new Map();
@@ -49,6 +53,12 @@ export class EmailController {
     // two separate stores, so a changed allowlist must be pushed into the
     // policy or the channel keeps rejecting the new senders.
     syncAccessPolicy = null,
+    // Optional: supplied when the channel supports pinning a chat to an
+    // existing session (the settings page session picker).
+    stateFor = null,
+    listWorkspaceSessions = null,
+    botWorkspaceFor = null,
+    defaultWorkspace = null,
   }) {
     if (!credentials || typeof credentials.resolve !== 'function'
       || typeof credentials.set !== 'function' || typeof credentials.unset !== 'function') {
@@ -64,6 +74,11 @@ export class EmailController {
     this.#createRuntime = createRuntime;
     this.#createApi = createApi;
     this.#syncAccessPolicy = typeof syncAccessPolicy === 'function' ? syncAccessPolicy : null;
+    this.#stateFor = typeof stateFor === 'function' ? stateFor : null;
+    this.#listWorkspaceSessions = typeof listWorkspaceSessions === 'function'
+      ? listWorkspaceSessions : null;
+    this.#botWorkspaceFor = typeof botWorkspaceFor === 'function' ? botWorkspaceFor : null;
+    this.#defaultWorkspace = typeof defaultWorkspace === 'string' ? defaultWorkspace : null;
     this.#deleteState = deleteState;
     this.#logger = logger;
   }
@@ -279,6 +294,86 @@ export class EmailController {
       revision: this.#revision,
       bots,
       totals: { configured: bots.length, connected: connectedCount },
+    };
+  }
+
+  /**
+   * Current session bindings for one mailbox, plus the senders known to this
+   * mailbox so the settings page can offer a per-sender override.
+   */
+  async getSessionBinding(botId) {
+    const config = this.#requireConfig(botId);
+    const state = await this.#stateFor?.(botId);
+    const bindings = state?.emailBindings?.() ?? { account: null, senders: {} };
+    const senders = Array.isArray(config.allowedSenders) ? config.allowedSenders : [];
+    return {
+      botId,
+      account: bindings.account ?? null,
+      senders: bindings.senders ?? {},
+      // The picker offers these as the per-sender rows.
+      knownSenders: senders,
+    };
+  }
+
+  /**
+   * Replace the bindings. An empty value clears them, which restores the
+   * default behaviour of one Harness session per mail thread.
+   */
+  async setSessionBinding(botId, value = {}) {
+    this.#requireConfig(botId);
+    if (!this.#stateFor) throw new Error(t('当前环境不支持会话绑定'));
+    const state = await this.#stateFor(botId);
+    if (typeof state?.setEmailBindings !== 'function') {
+      throw new Error(t('当前环境不支持会话绑定'));
+    }
+    const account = typeof value.account === 'string' && value.account.trim()
+      ? value.account.trim() : null;
+    const senders = {};
+    if (value.senders && typeof value.senders === 'object' && !Array.isArray(value.senders)) {
+      for (const [address, sessionId] of Object.entries(value.senders)) {
+        const key = typeof address === 'string' ? address.trim().toLowerCase() : '';
+        const session = typeof sessionId === 'string' ? sessionId.trim() : '';
+        if (key && session) senders[key] = session;
+      }
+    }
+    await state.setEmailBindings({ account, senders });
+    this.#touch();
+    return this.getSessionBinding(botId);
+  }
+
+  /**
+   * The bot's workspace, tolerating both a synchronous accessor and an async
+   * one, and treating a failure as "unknown" rather than failing the listing.
+   */
+  async #resolveBotWorkspace(botId) {
+    if (!this.#botWorkspaceFor) return null;
+    try {
+      return (await this.#botWorkspaceFor(botId)) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Sessions available to bind to, for the settings picker. */
+  async listSessions(botId) {
+    const config = this.#requireConfig(botId);
+    // The bot's own workspace is authoritative; defaultWorkspace is only a
+    // fallback for hosts that do not expose a per-bot workspace.
+    const workspace = (await this.#resolveBotWorkspace(botId)) ?? this.#defaultWorkspace;
+    if (!workspace || !this.#listWorkspaceSessions) {
+      return { botId, workspace: workspace ?? null, sessions: [] };
+    }
+    const listed = await this.#listWorkspaceSessions(workspace);
+    const sessions = Array.isArray(listed?.sessions) ? listed.sessions : [];
+    return {
+      botId,
+      workspace: listed?.workspace ?? workspace,
+      sessions: sessions.map((session) => ({
+        sessionId: session.sessionId ?? session.id ?? '',
+        title: String(session.title ?? '').slice(0, 120),
+        updatedAt: session.updatedAt ?? null,
+      })).filter((session) => session.sessionId),
+      config,
     };
   }
 

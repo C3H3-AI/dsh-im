@@ -80,7 +80,10 @@ test('normalizeEmail builds a bridge message and a threaded reply target', () =>
   const message = normalizeEmail(parsedMail(), { address: BOT, state });
   assert.equal(message.senderId, 'user@example.com');
   assert.equal(message.kind, 'direct');
-  assert.equal(message.content, 'Please do the thing');
+  // The subject and sender are prepended so the model sees them.
+  assert.match(message.content, /^Subject: Do the thing$/m);
+  assert.match(message.content, /^From: User <user@example\.com>$/m);
+  assert.match(message.content, /Please do the thing$/);
   assert.equal(message.conversationId, '<m1@mail.example>');
   assert.equal(message.replyTarget.to, 'user@example.com');
   assert.equal(message.replyTarget.subject, 'Re: Do the thing');
@@ -339,4 +342,89 @@ test('changing the mailbox allowlist pushes the matching access policy', async (
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
+});
+
+test('mail routing follows sender binding, then account binding, then a new session', async () => {
+  // Three levels of freedom: a per-sender pin, an account-wide pin, or nothing
+  // (each mail thread starts its own Harness session).
+  const state = new EmailStateStore(join(tmpdir(), 'unused-email-binding.json'));
+  const mail = (address, id) => ({
+    messageId: `<${id}@x>`,
+    from: { value: [{ address }] },
+    to: { value: [{ address: BOT }] },
+    subject: id,
+    text: 'hi',
+  });
+
+  // Level 3: unbound — each message maps to its own thread.
+  assert.notEqual(
+    normalizeEmail(mail('a@x.com', 'm1'), { address: BOT, state }).conversationId,
+    normalizeEmail(mail('a@x.com', 'm2'), { address: BOT, state }).conversationId,
+  );
+
+  // Level 2: account-wide pin — every sender shares one conversation.
+  await state.setEmailBindings({ account: 'session-FIXED', senders: {} });
+  assert.equal(
+    normalizeEmail(mail('a@x.com', 'm3'), { address: BOT, state }).conversationId,
+    'bound:session-FIXED',
+  );
+  assert.equal(
+    normalizeEmail(mail('b@x.com', 'm4'), { address: BOT, state }).conversationId,
+    'bound:session-FIXED',
+  );
+
+  // Level 1: a sender pin wins over the account pin.
+  await state.setEmailBindings({ account: 'session-FIXED', senders: { 'b@x.com': 'session-VIP' } });
+  assert.equal(
+    normalizeEmail(mail('a@x.com', 'm5'), { address: BOT, state }).conversationId,
+    'bound:session-FIXED',
+  );
+  assert.equal(
+    normalizeEmail(mail('b@x.com', 'm6'), { address: BOT, state }).conversationId,
+    'bound:session-VIP',
+  );
+});
+
+test('a bound conversation resolves to the pinned session instead of creating one', async () => {
+  // Without the mapping the resolver misses the key and starts a fresh session,
+  // so the pin would appear to save but have no effect.
+  const state = new EmailStateStore(join(tmpdir(), 'unused-email-binding-2.json'));
+  await state.setEmailBindings({ account: 'session-ABC', senders: { 'vip@x.com': 'session-VIP' } });
+  assert.equal(state.sessionFor('direct:bound:session-ABC'), 'session-ABC');
+  // The bridge prefixes the chat kind, so the marker is not at offset 0.
+  assert.equal(state.sessionFor('direct:bound:session-VIP'), 'session-VIP');
+  assert.equal(state.sessionFor('direct:<thread@x>'), null);
+});
+
+test('session bindings survive a reload', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-bind-'));
+  const path = join(dir, 'state.json');
+  try {
+    const first = await new EmailStateStore(path).load();
+    await first.setEmailBindings({ account: 'session-1', senders: { 'a@x.com': 'session-2' } });
+    const reloaded = await new EmailStateStore(path).load();
+    assert.equal(reloaded.boundSessionFor('a@x.com'), 'session-2');
+    assert.equal(reloaded.boundSessionFor('other@x.com'), 'session-1');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('the model sees the subject and the recipient lists', async () => {
+  // Only the body used to be forwarded, so an instruction written in the
+  // subject was dropped and a message with other recipients looked private.
+  const state = new EmailStateStore(join(tmpdir(), 'unused-email-headers.json'));
+  const message = normalizeEmail({
+    messageId: '<hdr@x>',
+    from: { value: [{ address: 'boss@corp.com', name: '老板' }] },
+    to: { value: [{ address: BOT }] },
+    cc: { value: [{ address: 'team@corp.com', name: '团队' }] },
+    subject: '统计销售数据',
+    text: '统计上个月的数据',
+  }, { address: BOT, state });
+  assert.match(message.content, /^Subject: 统计销售数据$/m);
+  assert.match(message.content, /^From: 老板 <boss@corp\.com>$/m);
+  assert.match(message.content, new RegExp(`^To: ${BOT}$`, 'm'));
+  assert.match(message.content, /^Cc: 团队 <team@corp\.com>$/m);
+  assert.match(message.content, /统计上个月的数据/);
 });

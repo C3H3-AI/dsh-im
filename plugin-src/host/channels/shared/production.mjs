@@ -128,6 +128,14 @@ export async function createTokenProductionController(ctx, config, internals, de
         });
       },
     } : {}),
+    // Channels that pin conversations to an existing session need the per-bot
+    // state and the session catalog to drive their settings UI.
+    ...(definitions.supportsSessionBinding ? {
+      stateFor,
+      listWorkspaceSessions: (workspace) => harness.listWorkspaceSessions(workspace),
+      botWorkspaceFor: (botId) => workspaces.workspaceFor(botId),
+      defaultWorkspace,
+    } : {}),
     createRuntime: async ({ botId, config: botConfig, token }) => {
       const state = await stateFor(botId);
       await workspaces.ensure(botId, {

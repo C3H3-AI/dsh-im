@@ -1033,6 +1033,16 @@ const EN = Object.freeze({
   '配置邮箱收发': 'Configure email send and receive',
   '配置邮箱': 'Configure mailbox',
   '邮箱配置': 'Mailbox configuration',
+  '会话绑定': 'Session binding',
+  '会话绑定已保存。': 'Session binding saved.',
+  '不绑定则每封新邮件开启一个新会话；绑定固定会话后，来信都在该会话内继续。': 'With no binding every new mail starts a new session; with a fixed session, incoming mail continues in that session.',
+  '固定会话（账号级）': 'Fixed session (account level)',
+  '不绑定（每封新邮件新建会话）': 'No binding (new session per mail)',
+  '按发件人覆盖（优先于账号级）': 'Per-sender override (takes priority)',
+  '跟随账号级': 'Follow the account setting',
+  '尚无可覆盖的发件人（先在上方配置允许的发件人）。': 'No senders to override yet (configure allowed senders above first).',
+  '保存绑定': 'Save binding',
+  '清除绑定': 'Clear binding',
 });
 
 export const en = EN;

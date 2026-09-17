@@ -2,6 +2,12 @@ import { deferredStateAccess, normalizeDeferredState } from './deferred-state.mj
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
+/**
+ * Additional persisted keys a subclass may own. Kept intentionally small and
+ * explicit: a subclass reads and writes them through extensionState().
+ */
+const EXTENSION_KEYS = Object.freeze(['emailBindings']);
+
 const EMPTY_STATE = Object.freeze({ version: 1, sessions: {}, seenMessageIds: [], cursor: null });
 
 function normalizeState(value) {
@@ -14,7 +20,7 @@ function normalizeState(value) {
       }
     }
   }
-  return {
+  const normalized = {
     version: 1,
     sessions,
     ...(value.deferred ? { deferred: normalizeDeferredState(value.deferred) } : {}),
@@ -23,6 +29,12 @@ function normalizeState(value) {
       : [],
     cursor: Number.isSafeInteger(value.cursor) && value.cursor >= 0 ? value.cursor : null,
   };
+  // Channel-specific extensions survive a reload; each is normalized by the
+  // subclass that owns it (see extensionKeys()).
+  for (const key of EXTENSION_KEYS) {
+    if (Object.hasOwn(value, key)) normalized[key] = value[key];
+  }
+  return normalized;
 }
 
 export class ConversationStateStore {
@@ -95,6 +107,20 @@ export class ConversationStateStore {
 
   snapshot() {
     return structuredClone(this.#state);
+  }
+
+  /**
+   * Live view of the private state for subclasses that persist their own keys.
+   * Returns the real object (not a clone) so an extension can be written in
+   * place; call persist() afterwards.
+   */
+  extensionState() {
+    return this.#state;
+  }
+
+  /** Flush the current state to disk after an extension write. */
+  persist() {
+    return this.#persist();
   }
 
   async remove() {

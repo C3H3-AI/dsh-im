@@ -9,6 +9,9 @@ import { ConversationStateStore } from '../shared/conversation-state-store.mjs';
  */
 const MAX_THREAD_IDS = 2_000;
 
+/** A conversation key that pins the chat to one existing Harness session. */
+export const BOUND_KEY_PREFIX = 'bound:';
+
 export class EmailStateStore extends ConversationStateStore {
   #threadIds = new Map();
 
@@ -31,5 +34,74 @@ export class EmailStateStore extends ConversationStateStore {
   /** Read-only view used by the threading resolver. */
   get threadMap() {
     return this.#threadIds;
+  }
+
+  /**
+   * Fixed-session bindings, both scopes in one document:
+   *   { account: <sessionId|null>, senders: { <address>: <sessionId> } }
+   * A sender entry wins over the account default; with neither set the
+   * conversation starts a fresh session per thread (the original behaviour).
+   */
+  emailBindings() {
+    const bindings = this.extensionState().emailBindings;
+    if (!bindings || typeof bindings !== 'object') return { account: null, senders: {} };
+    const senders = {};
+    if (bindings.senders && typeof bindings.senders === 'object' && !Array.isArray(bindings.senders)) {
+      for (const [address, sessionId] of Object.entries(bindings.senders)) {
+        if (typeof address === 'string' && address
+          && typeof sessionId === 'string' && sessionId) senders[address] = sessionId;
+      }
+    }
+    return {
+      account: typeof bindings.account === 'string' && bindings.account ? bindings.account : null,
+      senders,
+    };
+  }
+
+  async setEmailBindings(value) {
+    const next = value && typeof value === 'object' ? value : {};
+    const senders = {};
+    if (next.senders && typeof next.senders === 'object' && !Array.isArray(next.senders)) {
+      for (const [address, sessionId] of Object.entries(next.senders)) {
+        if (typeof address === 'string' && address
+          && typeof sessionId === 'string' && sessionId) senders[address] = sessionId;
+      }
+    }
+    this.extensionState().emailBindings = {
+      account: typeof next.account === 'string' && next.account ? next.account : null,
+      senders,
+    };
+    await this.persist();
+    return this.emailBindings();
+  }
+
+  /**
+   * Resolve the session a message should use, honouring the binding order:
+   * a sender-specific binding, then the account-wide binding, then null which
+   * means "start a new session for this thread".
+   */
+  boundSessionFor(senderAddress) {
+    const { account, senders } = this.emailBindings();
+    const address = typeof senderAddress === 'string' ? senderAddress.trim().toLowerCase() : '';
+    if (address && senders[address]) return senders[address];
+    return account;
+  }
+
+  /**
+   * A bound conversation key maps straight to the pinned session. Without this,
+   * the resolver would miss the mapping and create a brand-new session even
+   * though the user asked for a fixed one. The bridge prefixes the key with the
+   * chat kind (`direct:`), so the marker is searched rather than assumed to be
+   * at the start.
+   */
+  sessionFor(key) {
+    if (typeof key === 'string') {
+      const marker = key.indexOf(BOUND_KEY_PREFIX);
+      if (marker !== -1) {
+        const sessionId = key.slice(marker + BOUND_KEY_PREFIX.length);
+        if (sessionId) return sessionId;
+      }
+    }
+    return super.sessionFor(key);
   }
 }
