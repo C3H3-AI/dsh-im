@@ -1618,3 +1618,62 @@ test('a failing poll stops the mailbox reporting itself healthy', async () => {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+test('an opaque cursor is never seeded with the newest message', async () => {
+  // The Agent mailbox treats the cursor as "already handled" and lists
+  // newest-first, so seeding it with the newest id discarded that message
+  // forever — the first mail after connecting was never processed.
+  const { EmailRuntime } = await import('../../../src/channels/email/email-runtime.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-cursor-'));
+  try {
+    const state = await new EmailStateStore(join(dir, 'state.json')).load();
+    const runtime = new EmailRuntime({
+      config: { platformId: 'bot@agent.qq.com', transport: 'agent-mail', allowedSenders: [] },
+      token: 'unused',
+      credential: { address: 'bot@agent.qq.com', accessToken: 'AT' },
+      harness: { ensureRunning: async () => {} },
+      state,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      createApi: () => ({
+        connect: async () => {}, disconnect: async () => {},
+        // An opaque cursor, as the Agent mailbox returns.
+        latestUid: async () => 'msg_newest',
+        listMessages: async () => [], sendReply: async () => {}, sendText: async () => {},
+      }),
+    });
+    await runtime.start();
+    assert.notEqual(state.cursor(), 'msg_newest',
+      'seeding the newest id would mark the newest message as already handled');
+    assert.ok(state.cursor() === null || state.cursor() === 0,
+      `expected no cursor for an opaque transport, got ${JSON.stringify(state.cursor())}`);
+    await runtime.stop();
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('a numeric cursor still keeps the startup window', async () => {
+  // IMAP is numbered, so the window that catches mail arriving during startup
+  // must survive the fix above.
+  const { EmailRuntime } = await import('../../../src/channels/email/email-runtime.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-cursor2-'));
+  try {
+    const state = await new EmailStateStore(join(dir, 'state.json')).load();
+    const runtime = new EmailRuntime({
+      config: { platformId: 'me@qq.com', transport: 'imap-smtp', allowedSenders: [] },
+      token: 'unused',
+      harness: { ensureRunning: async () => {} },
+      state,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      createApi: () => ({
+        connect: async () => {}, disconnect: async () => {}, latestUid: async () => 100,
+        listMessages: async () => [], sendReply: async () => {}, sendText: async () => {},
+      }),
+    });
+    await runtime.start();
+    assert.equal(state.cursor(), 90, 'the startup window is still applied to numeric cursors');
+    await runtime.stop();
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});

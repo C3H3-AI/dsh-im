@@ -377,11 +377,15 @@ export class EmailRuntime {
         // seen-message set, so the window cannot re-drive old requests.
         const tip = await api.latestUid();
         // IMAP numbers messages, so a small window can be stepped back to pick
-        // up mail that arrived during startup. An opaque string cursor has no
-        // ordering to step back through, so it starts at the tip.
-        await this.#state.setCursor(
-          Number.isSafeInteger(tip) ? Math.max(0, tip - FIRST_CONNECT_WINDOW) : tip,
-        );
+        // up mail that arrived during startup.
+        //
+        // A transport with an opaque cursor treats it as "already handled", so
+        // seeding it with the newest id discarded that message forever. Starting
+        // with no cursor is safe: the allowlist and the seen-message set still
+        // stop history from re-driving old requests.
+        if (Number.isSafeInteger(tip)) {
+          await this.#state.setCursor(Math.max(0, tip - FIRST_CONNECT_WINDOW));
+        }
       }
       const client = new EmailBotClient(api, this.#abortController.signal);
       this.#bridge = new EmailHarnessBridge({
