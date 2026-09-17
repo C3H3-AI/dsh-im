@@ -874,3 +874,61 @@ test('the Agent mailbox authorization returns a URL to open and yields tokens', 
 });
 
 
+
+test('a mailbox is displayed under its own address, not a generic label', async () => {
+  // The shared client reads the identity from `bot`; a name left at the top
+  // level is ignored and the UI falls back to "<channel>机器人", which showed a
+  // mailbox as "Email机器人".
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-name-'));
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    await store.save({
+      platformId: 'someone@qq.com', name: 'someone@qq.com', provider: 'qq',
+      allowedSenders: ['boss@example.com'],
+    });
+    const controller = new EmailController({
+      credentials: {
+        async resolve() { return null; }, async set() {}, async unset() {},
+      },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+    });
+    const [bot] = controller.status().bots;
+    assert.equal(bot.bot.name, 'someone@qq.com', 'the address is the display name');
+    assert.equal(bot.bot.username, 'someone@qq.com');
+    // The masked form stays available for the secondary line.
+    // Two leading characters kept, the rest of the local part masked.
+    assert.equal(bot.bot.idMasked, 'so*****@qq.com');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('an Agent mailbox without a stored name still shows its address', async () => {
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-name2-'));
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    // An out-of-band authorization may bind without ever naming the mailbox.
+    await store.save({
+      platformId: 'bot@agent.qq.com', transport: 'agent-mail', allowedSenders: ['boss@example.com'],
+    });
+    const controller = new EmailController({
+      credentials: {
+        async resolve() { return null; }, async set() {}, async unset() {},
+      },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: { 'imap-smtp': () => ({}), 'agent-mail': () => ({}) },
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+    });
+    const [bot] = controller.status().bots;
+    assert.equal(bot.bot.name, 'bot@agent.qq.com');
+    assert.equal(bot.transport ?? store.list()[0].transport, 'agent-mail');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});

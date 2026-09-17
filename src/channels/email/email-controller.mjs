@@ -323,10 +323,18 @@ export class EmailController {
           : runtimeStatus?.connectionState === 'connecting' ? 'connecting' : 'disconnected';
       return {
         botId: config.botId,
+        // The shared client reads the identity from `bot`, so the name must live
+        // there — a top-level name is ignored and the UI falls back to
+        // "<channel>机器人". The address doubles as the display name, which
+        // beats a generic label.
+        bot: {
+          name: config.name || config.platformId,
+          username: config.username || config.platformId,
+          idMasked: maskEmailBotId(config.platformId),
+        },
         // The raw address is already semi-public, but the UI shows the masked
         // form for consistency with other channels.
         platformId: maskEmailBotId(config.platformId),
-        name: config.name,
         provider: config.provider,
         imapHost: config.imapHost,
         imapPort: config.imapPort,
