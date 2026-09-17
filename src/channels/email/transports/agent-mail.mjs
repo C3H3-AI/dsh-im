@@ -158,8 +158,11 @@ export function normalizeAgentMailMessage(raw) {
     ? raw.body
     : typeof raw.text === 'string' ? raw.text : '';
   return {
+    // `uid` is the API's own id, used for every path; `messageId` must be the
+    // RFC Message-ID, which the API exposes separately as rfc_message_id. Using
+    // the API id as the thread id failed the RFC parse and dropped the message.
     uid: id,
-    messageId: String(raw.message_id ?? raw.messageId ?? id),
+    messageId: String(raw.rfc_message_id ?? raw.rfcMessageId ?? ''),
     from: { value: [{ address: normalizeAddress(raw.from?.email ?? raw.from), name: raw.from?.name }] },
     to: { value: (Array.isArray(raw.to) ? raw.to : []).map((entry) => ({
       address: normalizeAddress(entry?.email ?? entry), name: entry?.name,
@@ -289,52 +292,100 @@ export class AgentMailTransport {
       for (const raw of items) {
         const id = String(raw?.id ?? raw?.message_id ?? '');
         if (afterUid !== null && afterUid !== undefined && id === String(afterUid)) {
-          return this.#oldestFirst(collected, allowed);
+          return await this.#oldestFirst(collected, allowed);
         }
         if (allowed) {
           const from = normalizeAddress(raw?.from?.email ?? raw?.from);
           if (!from || !allowed.has(from)) continue;
         }
         collected.push(raw);
-        if (collected.length >= limit) return this.#oldestFirst(collected, allowed);
+        if (collected.length >= limit) return await this.#oldestFirst(collected, allowed);
       }
       cursor = String(body?.pagination?.next_cursor ?? body?.pagination?.cursor ?? '');
       if (!cursor || items.length === 0) break;
     }
-    return this.#oldestFirst(collected, allowed);
+    return await this.#oldestFirst(collected, allowed);
+  }
+
+  /**
+   * Fill in a message's text from the per-message endpoint.
+   *
+   * The list endpoint returns only a snippet, so without this the message has
+   * no body and is dropped as empty. A failed read leaves the snippet in place
+   * rather than losing the mail entirely.
+   */
+  async #withBody(message) {
+    const aliasId = this.#aliasId;
+    const loaded = this.#withAttachmentLoaders(message, aliasId);
+    if (String(loaded.text ?? '').trim()) return loaded;
+    if (!aliasId || !loaded.uid) return loaded;
+    try {
+      const { status, body } = await this.#request(
+        'GET', `/v1/aliases/${aliasId}/messages/${encodeURIComponent(loaded.uid)}`,
+      );
+      if (status >= 400) return loaded;
+      const full = body?.data ?? body;
+      if (!full || typeof full !== 'object') return loaded;
+      const text = typeof full.body === 'string' ? decodeEntities(full.body) : '';
+      const html = typeof full.body_html === 'string' ? full.body_html : '';
+      // The RFC Message-ID only comes with the full message, so the thread id
+      // is filled in here too.
+      const rfc = String(full.rfc_message_id ?? '').trim();
+      return {
+        ...loaded,
+        ...(rfc ? { messageId: rfc } : {}),
+        text: text || loaded.text,
+        html: html || loaded.html,
+      };
+    } catch {
+      return loaded;
+    }
+  }
+
+  /** Attachments download separately, so each one carries its own loader. */
+  #withAttachmentLoaders(message, aliasId) {
+    if (!message.attachments?.length) return message;
+    return {
+      ...message,
+      attachments: message.attachments.map((file) => ({
+        ...file,
+        load: async () => {
+          if (!file.attachmentId || !aliasId) return Buffer.alloc(0);
+          const { status, body } = await this.#request(
+            'GET',
+            `/v1/aliases/${aliasId}/messages/${encodeURIComponent(message.uid)}/attachments/${encodeURIComponent(file.attachmentId)}`,
+          );
+          if (status >= 400) {
+            throw new AgentMailError(`attachment download failed: HTTP ${status}`, {
+              code: 'attachment-failed', status,
+            });
+          }
+          return body;
+        },
+      })),
+    };
   }
 
   /** Attachments download separately, so they are attached here as loaders. */
-  #oldestFirst(items, allowed) {
-    return items
+  /**
+   * Oldest-first, with each message's body loaded.
+   *
+   * The list endpoint returns only a `snippet`; the full body comes from the
+   * per-message endpoint, so a message read straight from the list has no text
+   * and is discarded as empty. Bodies are fetched here, after filtering, so an
+   * unlisted sender never costs a request.
+   */
+  async #oldestFirst(items, allowed) {
+    const normalized = items
       .slice()
       .reverse()
       .map((raw) => normalizeAgentMailMessage(raw))
       .filter(Boolean)
-      .map((message) => {
-        if (message.attachments.length === 0) return message;
-        const aliasId = this.#aliasId;
-        return {
-          ...message,
-          attachments: message.attachments.map((file) => ({
-            ...file,
-            load: async () => {
-              if (!file.attachmentId) return Buffer.alloc(0);
-              const { status, body } = await this.#request(
-                'GET',
-                `/v1/aliases/${aliasId}/messages/${message.uid}/attachments/${file.attachmentId}`,
-              );
-              if (status >= 400) {
-                throw new AgentMailError(`attachment download failed: HTTP ${status}`, {
-                  code: 'attachment-failed', status,
-                });
-              }
-              return body;
-            },
-          })),
-        };
-      })
-      .filter((message) => !allowed || allowed.has(normalizeAddress(message.from?.value?.[0]?.address)));
+      // Filter before loading anything: an unlisted sender must not cost a
+      // body read, and the body is a separate request.
+      .filter((message) => !allowed
+        || allowed.has(normalizeAddress(message.from?.value?.[0]?.address)));
+    return Promise.all(normalized.map((message) => this.#withBody(message)));
   }
 
   async sendReply({
@@ -475,6 +526,17 @@ export class AgentMailTransport {
     this.#email = String(primary?.email ?? '').trim();
     return aliasId;
   }
+}
+
+/** The API returns HTML-escaped bodies; decode the common entities. */
+function decodeEntities(value) {
+  return String(value ?? '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&amp;/gi, '&');
 }
 
 /** Message ids travel with angle brackets; the API path does not use them. */

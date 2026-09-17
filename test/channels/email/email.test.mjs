@@ -1677,3 +1677,76 @@ test('a numeric cursor still keeps the startup window', async () => {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+test('the agent mailbox reads the body, not just the list snippet', async () => {
+  // The list endpoint returns only a snippet; the body comes from the
+  // per-message read. Without it the message had no text and was dropped as
+  // empty, so mail arrived and was never processed.
+  const { AgentMailTransport } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const calls = [];
+  const fetchImpl = async (url) => {
+    const path = String(url).replace('https://api.agent.qq.com', '');
+    calls.push(path);
+    const reply = (data) => ({
+      ok: true, status: 200, text: async () => JSON.stringify(data), json: async () => data,
+    });
+    if (path.includes('/v1/me')) {
+      return reply({ data: { aliases: [{ alias_id: 'A1', email: 'b@a.qq.com', is_primary: true }] } });
+    }
+    if (path.includes('/messages/msg_1') && !path.includes('?')) {
+      return reply({ data: {
+        message_id: 'msg_1',
+        rfc_message_id: '<rfc-1@qq.com>',
+        body: 'real&nbsp;body',
+        from: { email: 'a@x.com' }, subject: 'S',
+      } });
+    }
+    // The list: a snippet, no body, no rfc id.
+    return reply({ data: [{
+      message_id: 'msg_1', subject: 'S', snippet: 'snippet only',
+      from: { email: 'a@x.com' },
+    }], pagination: {} });
+  };
+  const transport = new AgentMailTransport({
+    config: { address: 'b@a.qq.com', accessToken: 'x' }, fetchImpl,
+  });
+  const messages = await transport.listMessages({ afterUid: null, limit: 5 });
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].text, 'real body', 'the body is read, with entities decoded');
+  assert.equal(messages[0].messageId, '<rfc-1@qq.com>',
+    'the RFC Message-ID is used for threading, not the API id');
+  assert.equal(messages[0].uid, 'msg_1', 'the API id addresses the message');
+  assert.ok(calls.some((c) => c.includes('/messages/msg_1')), 'the body was fetched');
+});
+
+test('an unlisted sender costs no body read', async () => {
+  const { AgentMailTransport } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const calls = [];
+  const fetchImpl = async (url) => {
+    const path = String(url).replace('https://api.agent.qq.com', '');
+    calls.push(path);
+    const reply = (data) => ({
+      ok: true, status: 200, text: async () => JSON.stringify(data), json: async () => data,
+    });
+    if (path.includes('/v1/me')) {
+      return reply({ data: { aliases: [{ alias_id: 'A1', email: 'b@a.qq.com', is_primary: true }] } });
+    }
+    return reply({ data: [{
+      message_id: 'msg_x', subject: 'S', snippet: 's',
+      from: { email: 'stranger@evil.com' },
+    }], pagination: {} });
+  };
+  const transport = new AgentMailTransport({
+    config: { address: 'b@a.qq.com', accessToken: 'x' }, fetchImpl,
+  });
+  const messages = await transport.listMessages({
+    afterUid: null, limit: 5, allowSenders: new Set(['a@x.com']),
+  });
+  assert.deepEqual(messages, []);
+  assert.ok(!calls.some((c) => c.includes('/messages/msg_x')),
+    'no per-message read is issued for a filtered sender');
+});
