@@ -1755,17 +1755,15 @@ test('an already-seen message is not delivered twice', async () => {
   // The cursor marks a boundary in the listing, but a mailbox whose listing
   // shifts (mail moved or deleted) loses that boundary and the same messages
   // come back every poll — each one re-running a turn.
-  const state = await new EmailStateStore(join(tmpdir(), 'unused-email-seen.json')).load();
-  const message = normalizeEmail(parsedMail({ messageId: '<rfc-1@x>' }), { address: BOT, state });
-  const key = message.messageId;
-
-  assert.equal(state.hasSeen(key), false, 'a fresh message is unseen');
-  await state.markSeen(key);
-  assert.equal(state.hasSeen(key), true, 'a delivered message is recorded');
-
-  // The recorded set survives a reload, which is what makes it a real guard.
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-seen2-'));
+  // A private directory: a shared path would carry state between tests.
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-seen-'));
   try {
+    const state = await new EmailStateStore(join(dir, 'seen.json')).load();
+    const key = '<rfc-1@x>';
+    assert.equal(state.hasSeen(key), false, 'a fresh message is unseen');
+    await state.markSeen(key);
+    assert.equal(state.hasSeen(key), true, 'a delivered message is recorded');
+
     const path = join(dir, 'state.json');
     const first = await new EmailStateStore(path).load();
     await first.markSeen('<rfc-2@x>');
