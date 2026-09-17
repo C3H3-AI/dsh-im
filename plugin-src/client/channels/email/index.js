@@ -71,7 +71,7 @@ function waitingHint(session) {
  * WeChat QR, so the user opens this URL (or scans it) and signs in there. The
  * page is polled until the server reports the authorization.
  */
-function AgentMailAuth({ rpcCall, endpoints, disabled, onAuthorized, onError }) {
+function AgentMailAuth({ rpcCall, endpoints, disabled, onAuthorized, onError, blocked = false }) {
   const [session, setSession] = React.useState(null);
   const [status, setStatus] = React.useState('idle');
   const [error, setError] = React.useState(null);
@@ -129,7 +129,12 @@ function AgentMailAuth({ rpcCall, endpoints, disabled, onAuthorized, onError }) 
   }, [endpoints, invoke, onAuthorized, session, status]);
 
   if (status === 'authorized') {
-    return h('p', { className: 'dim-emailHint', role: 'status' }, '授权成功，正在接入邮箱…');
+    // The panel submits on its own, but only once an address and at least one
+    // allowed sender exist; say so rather than implying work is under way.
+    return h('p', { className: 'dim-emailHint', role: 'status' },
+      blocked
+        ? '授权成功；请填写邮箱地址与允许的发件人后完成接入。'
+        : '授权成功，正在接入邮箱…');
   }
 
   return h('div', { className: 'dim-emailAuth' },
@@ -173,6 +178,9 @@ function MailboxPanel({ busy, error, onSubmit, onCancel, rpcCall, endpoints }) {
   const [transportKey, setTransportKey] = React.useState('imap-smtp');
   // Held only in memory: the panel hands the pair straight to the bind call.
   const [tokens, setTokens] = React.useState(null);
+  // A completed authorization submits on its own; the user should not have to
+  // click again after scanning.
+  const [autoBind, setAutoBind] = React.useState(null);
   const [provider, setProvider] = React.useState('qq');
   const [address, setAddress] = React.useState('');
   const [password, setPassword] = React.useState('');
@@ -189,11 +197,13 @@ function MailboxPanel({ busy, error, onSubmit, onCancel, rpcCall, endpoints }) {
     && (!transport.needsPassword || Boolean(password))
     && (!isAgentMail || Boolean(tokens));
 
-  const submit = () => onSubmit({
+  // `granted` lets the auto-submit path pass the tokens it just received,
+  // since React state has not re-rendered with them yet.
+  const submit = (granted = null) => onSubmit({
     address: address.trim(),
     transport: transport.key,
     ...(transport.needsPassword ? { password } : {}),
-    ...(isAgentMail && tokens ? { ...tokens } : {}),
+    ...(isAgentMail && (granted ?? tokens) ? { ...(granted ?? tokens) } : {}),
     ...(transport.needsProvider ? { provider } : {}),
     allowedSenders: allowedSenders
       .split(/[\s,;，；]+/)
@@ -204,6 +214,17 @@ function MailboxPanel({ busy, error, onSubmit, onCancel, rpcCall, endpoints }) {
       smtpHost: smtpHost.trim(), smtpPort: smtpPort.trim() || undefined,
     } : {}),
   });
+
+  // Once an authorization lands, finish the job without a second click.
+  React.useEffect(() => {
+    if (!autoBind || !address.trim() || busy) return;
+    const senders = allowedSenders.split(/[\s,;，；]+/).map((v) => v.trim()).filter(Boolean);
+    // The allowlist is required; ask for it rather than failing the bind.
+    if (senders.length === 0) return;
+    submit(autoBind);
+    setAutoBind(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoBind, address, allowedSenders, busy]);
 
   return h('section', { className: 'ddt-card dim-surfaceCard dim-emailPanel' },
     h('h3', null, '接入邮箱'),
@@ -252,7 +273,12 @@ function MailboxPanel({ busy, error, onSubmit, onCancel, rpcCall, endpoints }) {
           rpcCall,
           endpoints,
           disabled: busy,
-          onAuthorized: (granted) => setTokens(granted),
+          // Auto-submit: the panel says "connecting", so it must actually
+          // connect. Requiring a second click stranded users who had already
+          // scanned, and a reload lost the token entirely.
+          onAuthorized: (granted) => { setTokens(granted); setAutoBind(granted); },
+          blocked: !address.trim()
+            || allowedSenders.split(/[\s,;，；]+/).every((value) => !value.trim()),
           onError: () => setTokens(null),
         })
         : null,
@@ -266,7 +292,8 @@ function MailboxPanel({ busy, error, onSubmit, onCancel, rpcCall, endpoints }) {
       h('button', { type: 'button', className: 'ddt-button', onClick: onCancel, disabled: busy }, '取消'),
       h('button', {
         type: 'button', className: 'ddt-button', 'data-kind': 'primary',
-        onClick: submit, disabled: busy || !maySubmit,
+        // Wrap so the click event is not mistaken for granted tokens.
+        onClick: () => submit(), disabled: busy || !maySubmit,
       }, busy ? '正在连接邮箱…' : '连接邮箱')));
 }
 

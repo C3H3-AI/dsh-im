@@ -1055,6 +1055,7 @@ const EN = Object.freeze({
   ' 分钟': ' minutes',
   '内有效，可保持本页打开。': '; you can keep this page open.',
   '授权成功，正在接入邮箱…': 'Authorized; connecting the mailbox…',
+  '授权成功；请填写邮箱地址与允许的发件人后完成接入。': 'Authorized. Enter the mailbox address and at least one allowed sender to finish connecting.',
   '腾讯 Agent 邮箱需要微信扫码授权。点下面的按钮生成授权链接，在打开的页面里用微信扫码登录并确认。': 'The Tencent Agent mailbox authorizes with a WeChat QR code. Generate an authorization link, then scan it with WeChat on the page that opens and confirm.',
   '请求失败': 'The request failed',
 });

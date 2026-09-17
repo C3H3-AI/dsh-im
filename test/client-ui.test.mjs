@@ -1792,3 +1792,71 @@ test('the connector form requires authorization before binding an Agent mailbox'
     'the mailbox cannot be bound before the authorization completes');
   renderer.unmount();
 });
+test('a completed authorization connects without a second click', async () => {
+  // The panel says "connecting", so it must actually connect. Requiring
+  // another click stranded users who had already scanned — and a reload threw
+  // the tokens away.
+  const { EMAIL_SETTINGS_DEFINITION } = await import(
+    '../plugin-src/client/channels/email/index.js'
+  );
+  const submitted = [];
+  const rpcCall = async (endpoint) => {
+    if (endpoint === 'bot.auth.start') {
+      return { ok: true, value: {
+        browserUrl: 'https://agent.qq.com/a', inputCode: 'ic_1', expiresInMs: 600_000,
+      } };
+    }
+    if (endpoint === 'bot.auth.poll') {
+      return { ok: true, value: { authorized: true, accessToken: 'AT', refreshToken: 'RT' } };
+    }
+    return { ok: true, value: {} };
+  };
+  const textOf = (node) => {
+    if (typeof node === 'string') return node;
+    if (Array.isArray(node)) return node.map(textOf).join('');
+    if (node?.children) return textOf(node.children);
+    return '';
+  };
+  let renderer;
+  await TestRenderer.act(async () => {
+    renderer = TestRenderer.create(React.createElement(
+      EMAIL_SETTINGS_DEFINITION.CredentialPanel,
+      {
+        busy: false, error: null, onCancel() {},
+        onSubmit: (value) => submitted.push(value),
+        rpcCall,
+        endpoints: { startAuth: 'bot.auth.start', pollAuth: 'bot.auth.poll' },
+      },
+    ));
+  });
+  const button = (label) => renderer.root.findAll((node) => node.type === 'button')
+    .find((b) => textOf(b.children) === label);
+
+  // Choose the Agent mailbox, then supply the fields the bind needs.
+  const transportSelect = renderer.root.findAll((node) => node.type === 'select')
+    .find((select) => [...select.props.children]
+      .some((option) => option.props.value === 'agent-mail'));
+  await TestRenderer.act(async () => {
+    transportSelect.props.onChange({ target: { value: 'agent-mail' } });
+  });
+  const address = renderer.root.findAll((node) => node.type === 'input')
+    .find((input) => input.props.type === 'email');
+  await TestRenderer.act(async () => {
+    address.props.onChange({ target: { value: 'bot@agent.qq.com' } });
+  });
+  const allowlist = renderer.root.findAll((node) => node.type === 'textarea')[0];
+  await TestRenderer.act(async () => {
+    allowlist.props.onChange({ target: { value: 'boss@corp.com' } });
+  });
+
+  await TestRenderer.act(async () => { button('生成授权链接').props.onClick(); });
+  // Let the poll interval observe the authorization.
+  await TestRenderer.act(async () => { await new Promise((r) => { setTimeout(r, 3_400); }); });
+
+  assert.equal(submitted.length, 1, 'the authorization submits the bind on its own');
+  assert.equal(submitted[0].transport, 'agent-mail');
+  assert.equal(submitted[0].address, 'bot@agent.qq.com');
+  assert.equal(submitted[0].accessToken, 'AT');
+  assert.deepEqual(submitted[0].allowedSenders, ['boss@corp.com']);
+  renderer.unmount();
+});
