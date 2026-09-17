@@ -1568,3 +1568,53 @@ test('the mailbox update endpoint accepts the fields the client sends', async ()
   await handler('bot.mailbox.update', { botId: 'email_1', update: { allowedSenders: ['c@z.com'] } });
   assert.deepEqual(seen[1].update, { allowedSenders: ['c@z.com'] });
 });
+
+test('a failing poll stops the mailbox reporting itself healthy', async () => {
+  // The transport opens once, then polls forever. A poll that keeps failing —
+  // an expired token, say — left connectionState at "connected", so the
+  // settings card said the channel was healthy while no mail could be read.
+  const { EmailRuntime } = await import('../../../src/channels/email/email-runtime.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-pollfail-'));
+  try {
+    const state = await new EmailStateStore(join(dir, 'state.json')).load();
+    let fail = false;
+    const runtime = new EmailRuntime({
+      config: { platformId: 'bot@agent.qq.com', transport: 'agent-mail', allowedSenders: [] },
+      token: 'unused',
+      credential: { address: 'bot@agent.qq.com', accessToken: 'AT' },
+      harness: { ensureRunning: async () => {} },
+      state,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      pollIntervalMs: 20,
+      createApi: () => ({
+        connect: async () => {}, disconnect: async () => {}, latestUid: async () => 0,
+        listMessages: async () => {
+          if (fail) throw new Error('/v1/me failed: HTTP 401');
+          return [];
+        },
+        sendReply: async () => {}, sendText: async () => {},
+      }),
+    });
+    await runtime.start();
+    assert.equal(runtime.status.connectionState, 'connected');
+
+    fail = true;
+    // Let the poll loop run into the failure.
+    for (let i = 0; i < 40 && runtime.status.connectionState !== 'failed'; i += 1) {
+      await new Promise((r) => { setTimeout(r, 25); });
+    }
+    assert.equal(runtime.status.connectionState, 'failed',
+      'a failing poll must not keep reporting connected');
+    assert.match(String(runtime.status.lastError), /401/);
+
+    // Recovery is reflected too.
+    fail = false;
+    for (let i = 0; i < 40 && runtime.status.connectionState !== 'connected'; i += 1) {
+      await new Promise((r) => { setTimeout(r, 25); });
+    }
+    assert.equal(runtime.status.connectionState, 'connected', 'a healthy poll restores the state');
+    await runtime.stop();
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});

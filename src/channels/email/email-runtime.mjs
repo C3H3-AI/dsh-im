@@ -459,9 +459,15 @@ export class EmailRuntime {
       }
       this.#status.lastCheckedAt = Date.now();
       this.#status.lastError = null;
+      // A poll that works is the proof the mailbox is reachable.
+      this.#status.connectionState = 'connected';
     } catch (error) {
       if (!this.#stopped) {
         this.#status.lastError = error.message;
+        // A failing poll means the mailbox is NOT usable, even though the
+        // transport opened; leaving this as "connected" reported a healthy
+        // channel while no mail could be read at all.
+        this.#status.connectionState = 'failed';
         this.#logger.warn?.('[dsh-im:email] polling failed', error);
       }
     }
