@@ -1,0 +1,13 @@
+import { rpc, readState } from './lib.mjs';
+const AGENT_BOT = 'email_9b295ef4019bfd69361b3151';
+const st = await rpc('connection.status', {});
+const b = (st.value?.bots || []).find(x => x.transport === 'agent-mail');
+const rt = b?.runtime || {};
+console.log('  state:', b?.state);
+console.log('  received:', rt.messagesReceived, '| replied:', rt.messagesReplied, '| rejected:', rt.messagesRejected);
+console.log('  lastMessageAt:', rt.lastMessageAt);
+console.log('  lastError:', rt.lastError || '无');
+const s = readState(AGENT_BOT);
+console.log('  seen:', (s.seenMessageIds||[]).length);
+console.log('  sessions:', Object.keys(s.sessions||{}).length);
+for (const [k,v] of Object.entries(s.sessions||{})) console.log('   ', k.slice(0,44), '→', v.slice(0,26));

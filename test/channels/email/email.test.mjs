@@ -1750,3 +1750,29 @@ test('an unlisted sender costs no body read', async () => {
   assert.ok(!calls.some((c) => c.includes('/messages/msg_x')),
     'no per-message read is issued for a filtered sender');
 });
+
+test('an already-seen message is not delivered twice', async () => {
+  // The cursor marks a boundary in the listing, but a mailbox whose listing
+  // shifts (mail moved or deleted) loses that boundary and the same messages
+  // come back every poll — each one re-running a turn.
+  const state = await new EmailStateStore(join(tmpdir(), 'unused-email-seen.json')).load();
+  const message = normalizeEmail(parsedMail({ messageId: '<rfc-1@x>' }), { address: BOT, state });
+  const key = message.messageId;
+
+  assert.equal(state.hasSeen(key), false, 'a fresh message is unseen');
+  await state.markSeen(key);
+  assert.equal(state.hasSeen(key), true, 'a delivered message is recorded');
+
+  // The recorded set survives a reload, which is what makes it a real guard.
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-seen2-'));
+  try {
+    const path = join(dir, 'state.json');
+    const first = await new EmailStateStore(path).load();
+    await first.markSeen('<rfc-2@x>');
+    const reloaded = await new EmailStateStore(path).load();
+    assert.equal(reloaded.hasSeen('<rfc-2@x>'), true);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+

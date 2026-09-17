@@ -449,6 +449,18 @@ export class EmailRuntime {
         // string id (Agent mailbox); the cursor follows whichever it is.
         const uid = parsed?.uid;
         const message = normalizeEmail(parsed, { address: this.#config.platformId, state: this.#state });
+        // The seen set is the real guard against re-processing. A cursor marks a
+        // boundary, but a listing that shifts underneath it (mail moved or
+        // deleted) loses that boundary and replays everything. Keyed on the RFC
+        // Message-ID, which every transport provides.
+        const seenKey = message?.messageId
+          ?? (uid === undefined || uid === null ? null : String(uid));
+        if (seenKey && this.#state.hasSeen(seenKey)) {
+          if (uid !== undefined && uid !== null && uid !== '' && uid !== cursor) {
+            await this.#state.setCursor(uid);
+          }
+          continue;
+        }
         if (message) {
           // Remember the thread chain before the turn runs so a reply that
           // arrives while the turn is still working still joins this session.
@@ -457,6 +469,7 @@ export class EmailRuntime {
           }
           await this.#bridge.accept(message);
         }
+        if (seenKey) await this.#state.markSeen(seenKey);
         if (uid !== undefined && uid !== null && uid !== '' && uid !== cursor) {
           await this.#state.setCursor(uid);
         }
