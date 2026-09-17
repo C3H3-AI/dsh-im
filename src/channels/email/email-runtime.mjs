@@ -278,8 +278,11 @@ export class EmailRuntime {
     createApi = (options) => new EmailApi(options),
     credential = null, onTokensRefreshed = null, createTransport = null,
   }) {
-    if (!config || !token || !harness || !state) {
-      throw new TypeError('EmailRuntime requires config, token, Harness, and state');
+    // `token` is absent for a transport that authenticates another way: the
+    // Agent mailbox lets agently-cli hold the credentials in the system
+    // keychain, so requiring one here blocked it from ever starting.
+    if (!config || !harness || !state) {
+      throw new TypeError('EmailRuntime requires config, Harness, and state');
     }
     this.#config = config;
     this.#token = token;

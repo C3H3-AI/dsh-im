@@ -1266,3 +1266,30 @@ test('the Agent mailbox needs no credential of its own', async () => {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+test('the runtime starts an Agent mailbox that carries no token', async () => {
+  // agently-cli holds the credentials, so the runtime is handed an address
+  // only. Requiring a token blocked the mailbox from ever starting — it
+  // reported "requires config, token, Harness, and state".
+  const { EmailRuntime } = await import('../../../src/channels/email/email-runtime.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-notoken-'));
+  try {
+    const state = await new EmailStateStore(join(dir, 'state.json')).load();
+    const runtime = new EmailRuntime({
+      config: { platformId: 'bot@agent.qq.com', transport: 'agent-mail', allowedSenders: [] },
+      // No token: the CLI owns the session.
+      harness: { ensureRunning: async () => {} },
+      state,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      createApi: () => ({
+        connect: async () => {}, disconnect: async () => {}, latestUid: async () => 0,
+        listMessages: async () => [], sendReply: async () => {}, sendText: async () => {},
+      }),
+    });
+    await runtime.start();
+    assert.equal(runtime.status.ready, true, 'the mailbox starts without a token');
+    await runtime.stop();
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
