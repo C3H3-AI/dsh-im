@@ -17,8 +17,23 @@ const CSS = String.raw`
 .dim-emailGrid { display: grid; grid-template-columns: 1fr 120px; gap: 12px; }
 .dim-emailBinding { margin-top: 20px; border-top: 1px solid var(--dsw-alias-border, #dee0e3); padding-top: 16px; }
 .dim-emailBinding h4 { margin: 0 0 4px; font-size: 14px; }
-.dim-emailBindingRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 10px; align-items: center; }
+/* The sender address wraps above its picker instead of squeezing the select
+   into a narrow column, so a long session title stays fully readable. */
+.dim-emailBindingRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px dashed var(--dsw-alias-border, #eef0f2);
+}
+.dim-emailBindingRow:first-of-type { border-top: 0; }
 .dim-emailBindingSender { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.dim-emailBindingRow select { width: 100%; }
+/* Selects clip their own text; a minimum width keeps the chosen title legible. */
+.dim-emailBinding select { min-width: 0; }
+/* The full title of the current choice, wrapping instead of clipping. */
+.dim-emailBindingSelected { display: block; white-space: normal; overflow-wrap: anywhere; }
 `;
 export function installEmailStyles() {
   if (typeof document === 'undefined') return () => {};

@@ -119,6 +119,29 @@ function MailboxPanel({ busy, error, onSubmit, onCancel }) {
  *   2. the account-wide binding,
  *   3. no binding — every mail thread starts its own session.
  */
+/**
+ * Session ids are long uuids. The picker shows the title, falling back to a
+ * shortened id, because the per-sender column is too narrow for the full id.
+ */
+function shortenSessionId(sessionId) {
+  const text = String(sessionId ?? '');
+  return text.length <= 20 ? text : `${text.slice(0, 8)}…${text.slice(-6)}`;
+}
+
+/**
+ * Pickers are narrow, so a very long title is trimmed from the middle with the
+ * tail kept — automation titles carry their distinguishing timestamp at the
+ * end. The full id remains the option's tooltip.
+ */
+function sessionLabel(session) {
+  const title = String(session?.title ?? '').trim();
+  if (!title) return shortenSessionId(session?.sessionId);
+  if (title.length <= 22) return title;
+  // 13px CJK / 7px latin: 22 visible characters stay inside the ~200px the
+  // narrowest picker gives the label.
+  return `${title.slice(0, 12)}…${title.slice(-8)}`;
+}
+
 function SessionBindingPanel({ account, rpcCall, endpoints, onChanged, disabled }) {
   const [binding, setBinding] = React.useState(null);
   const [sessions, setSessions] = React.useState([]);
@@ -188,12 +211,30 @@ function SessionBindingPanel({ account, rpcCall, endpoints, onChanged, disabled 
   const options = (selected, placeholder) => [
     h('option', { key: '__none', value: '' }, placeholder),
     ...sessions.map((session) => h('option', {
-      key: session.sessionId, value: session.sessionId,
-    }, session.title ? `${session.title}（${session.sessionId}）` : session.sessionId)),
+      key: session.sessionId,
+      value: session.sessionId,
+      // The full id is a long uuid; it stays available as the tooltip and the
+      // value, while the visible label keeps the title within the narrow
+      // per-sender column.
+      title: session.sessionId,
+    }, sessionLabel(session))),
     // Keep an unknown-but-set id selectable so loading never silently drops it.
     ...(selected && !sessions.some((s) => s.sessionId === selected)
-      ? [h('option', { key: selected, value: selected }, selected)] : []),
+      ? [h('option', { key: selected, value: selected, title: selected }, shortenSessionId(selected))]
+      : []),
   ];
+
+  // The picker truncates long titles, so the current choice is echoed in full
+  // underneath it; nothing is lost to the narrow column.
+  const selectionHint = (sessionId) => {
+    if (!sessionId) return null;
+    const found = sessions.find((session) => session.sessionId === sessionId);
+    const title = String(found?.title ?? '').trim();
+    if (!title || title.length <= 28) return null;
+    // Split so the prefix is translated while the title stays verbatim.
+    return h('span', { className: 'dim-emailHint dim-emailBindingSelected', title },
+      '已选：', title);
+  };
 
   const locked = disabled || busy;
 
@@ -202,11 +243,13 @@ function SessionBindingPanel({ account, rpcCall, endpoints, onChanged, disabled 
     h('p', { className: 'dim-emailHint' },
       '不绑定则每封新邮件开启一个新会话；绑定固定会话后，来信都在该会话内继续。'),
     h('div', { className: 'dim-emailFields' },
-      field('固定会话（账号级）', h('select', {
-        value: accountSession,
-        disabled: locked,
-        onChange: (event) => setAccountSession(event.target.value),
-      }, options(accountSession, '不绑定（每封新邮件新建会话）'))),
+      field('固定会话（账号级）',
+        h('select', {
+          value: accountSession,
+          disabled: locked,
+          onChange: (event) => setAccountSession(event.target.value),
+        }, options(accountSession, '不绑定（每封新邮件新建会话）')),
+        selectionHint(accountSession)),
       senderRows.length
         ? h('div', { className: 'dim-emailFields' },
           h('span', { className: 'dim-emailHint' }, '按发件人覆盖（优先于账号级）'),

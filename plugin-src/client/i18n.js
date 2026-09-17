@@ -1044,6 +1044,7 @@ const EN = Object.freeze({
   '保存绑定': 'Save binding',
   '清除绑定': 'Clear binding',
   '所有发件人同上': 'Point every sender at the same session',
+  '已选：': 'Selected: ',
   '请求失败': 'The request failed',
 });
 
