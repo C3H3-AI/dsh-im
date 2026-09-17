@@ -23,6 +23,30 @@ const PROVIDER_HINTS = {
   custom: '请填写邮箱服务商提供的 IMAP 与 SMTP 服务器地址及端口。',
 };
 
+/**
+ * How the mailbox is reached. Mirrors the Host's EMAIL_TRANSPORTS: the choice
+ * decides which fields the form asks for, so one channel serves every mail
+ * protocol instead of one tab per protocol.
+ */
+const TRANSPORTS = [
+  {
+    key: 'imap-smtp',
+    label: 'IMAP / SMTP（任意邮箱）',
+    hint: '用邮箱地址 + 授权码接入，适用于 QQ、163、Gmail 及自建邮箱。',
+    needsPassword: true,
+    needsProvider: true,
+    needsHosts: true,
+  },
+  {
+    key: 'agent-mail',
+    label: '腾讯 Agent 邮箱',
+    hint: '用微信扫码授权接入，无需授权码与服务器地址。',
+    needsPassword: false,
+    needsProvider: false,
+    needsHosts: false,
+  },
+];
+
 function field(label, control, hint) {
   return h('label', { className: 'dim-emailField' },
     h('span', null, label),
@@ -36,6 +60,7 @@ function field(label, control, hint) {
  * forgeable and an open mailbox would let anyone drive the Harness.
  */
 function MailboxPanel({ busy, error, onSubmit, onCancel }) {
+  const [transportKey, setTransportKey] = React.useState('imap-smtp');
   const [provider, setProvider] = React.useState('qq');
   const [address, setAddress] = React.useState('');
   const [password, setPassword] = React.useState('');
@@ -44,13 +69,16 @@ function MailboxPanel({ busy, error, onSubmit, onCancel }) {
   const [imapPort, setImapPort] = React.useState('');
   const [smtpHost, setSmtpHost] = React.useState('');
   const [smtpPort, setSmtpPort] = React.useState('');
-  const preset = PROVIDERS.find((entry) => entry.key === provider) ?? PROVIDERS[0];
-  const custom = provider === 'custom';
+  const transport = TRANSPORTS.find((entry) => entry.key === transportKey) ?? TRANSPORTS[0];
+  const custom = transport.needsProvider && provider === 'custom';
+  // The Agent mailbox authorizes by QR code, so it has no password to collect.
+  const maySubmit = Boolean(address.trim()) && (!transport.needsPassword || Boolean(password));
 
   const submit = () => onSubmit({
     address: address.trim(),
-    password,
-    provider,
+    transport: transport.key,
+    ...(transport.needsPassword ? { password } : {}),
+    ...(transport.needsProvider ? { provider } : {}),
     allowedSenders: allowedSenders
       .split(/[\s,;，；]+/)
       .map((value) => value.trim())
@@ -65,20 +93,26 @@ function MailboxPanel({ busy, error, onSubmit, onCancel }) {
     h('h3', null, '接入邮箱'),
     h('p', null, 'DeepSeek Harness 会读取该邮箱的新邮件作为指令，并在同一邮件线程内回复处理结果。'),
     h('div', { className: 'dim-emailFields' },
-      field('邮箱服务商', h('select', {
-        value: provider,
-        onChange: (event) => setProvider(event.target.value),
+      field('接入方式', h('select', {
+        value: transportKey,
+        onChange: (event) => setTransportKey(event.target.value),
         disabled: busy,
-      }, PROVIDERS.map((entry) => h('option', { key: entry.key, value: entry.key }, entry.label))),
-      h('span', { className: 'dim-emailHint' }, PROVIDER_HINTS[provider])),
+      }, TRANSPORTS.map((entry) => h('option', { key: entry.key, value: entry.key }, entry.label))),
+      h('span', { className: 'dim-emailHint' }, transport.hint)),
       field('邮箱地址', h('input', {
         type: 'email', value: address, placeholder: 'your-name@qq.com', disabled: busy,
         onChange: (event) => setAddress(event.target.value),
       })),
-      field('应用密码 / 授权码', h('input', {
+      transport.needsProvider ? field('邮箱服务商', h('select', {
+        value: provider,
+        onChange: (event) => setProvider(event.target.value),
+        disabled: busy,
+      }, PROVIDERS.map((entry) => h('option', { key: entry.key, value: entry.key }, entry.label))),
+      h('span', { className: 'dim-emailHint' }, PROVIDER_HINTS[provider])) : null,
+      transport.needsPassword ? field('应用密码 / 授权码', h('input', {
         type: 'password', value: password, placeholder: 'IMAP/SMTP 授权码', disabled: busy,
         onChange: (event) => setPassword(event.target.value),
-      }), '不是邮箱登录密码；请在邮箱设置中单独生成。'),
+      }), '不是邮箱登录密码；请在邮箱设置中单独生成。') : null,
       custom ? h('div', { className: 'dim-emailGrid' },
         field('IMAP 服务器', h('input', {
           value: imapHost, placeholder: 'imap.example.com', disabled: busy,
@@ -107,7 +141,7 @@ function MailboxPanel({ busy, error, onSubmit, onCancel }) {
       h('button', { type: 'button', className: 'ddt-button', onClick: onCancel, disabled: busy }, '取消'),
       h('button', {
         type: 'button', className: 'ddt-button', 'data-kind': 'primary',
-        onClick: submit, disabled: busy || !address.trim() || !password,
+        onClick: submit, disabled: busy || !maySubmit,
       }, busy ? '正在连接邮箱…' : '连接邮箱')));
 }
 

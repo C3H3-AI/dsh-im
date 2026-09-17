@@ -1658,3 +1658,95 @@ test('the Email account card renders its settings panel without crashing', async
   renderer.unmount();
 });
 
+
+test('the Email connector form follows the chosen transport', async () => {
+  // One channel serves every mail protocol: the transport choice decides which
+  // fields are collected, so an Agent mailbox is never asked for an app
+  // password or IMAP/SMTP hosts it does not have.
+  const { EMAIL_SETTINGS_DEFINITION } = await import(
+    '../plugin-src/client/channels/email/index.js'
+  );
+  const Panel = EMAIL_SETTINGS_DEFINITION.CredentialPanel;
+  // Read the label text by walking the tree: React renders a text child as a
+  // node, so reading `children` directly returns objects, not strings.
+  const textOf = (node) => {
+    if (typeof node === 'string') return node;
+    if (Array.isArray(node)) return node.map(textOf).join('');
+    if (node?.children) return textOf(node.children);
+    return '';
+  };
+  const fieldLabels = (renderer) => renderer.root
+    .findAll((node) => node.type === 'label')
+    .map((label) => textOf(label.children).trim())
+    .filter(Boolean);
+
+  let renderer;
+  await TestRenderer.act(async () => {
+    renderer = TestRenderer.create(React.createElement(Panel, {
+      busy: false, error: null, onSubmit() {}, onCancel() {},
+    }));
+  });
+
+  const selects = () => renderer.root.findAll((node) => node.type === 'select');
+  const transportSelect = () => selects().find((select) => [...select.props.children]
+    .some((option) => option.props.value === 'agent-mail'));
+
+  assert.ok(transportSelect(), 'the form must offer a transport choice');
+  // A label carries its hint text too, so the field is matched by prefix.
+  const hasField = (labels, name) => labels.some((label) => label.startsWith(name));
+  const imapFields = fieldLabels(renderer);
+  assert.ok(hasField(imapFields, '应用密码 / 授权码'), 'IMAP asks for an app password');
+  assert.ok(hasField(imapFields, '邮箱服务商'), 'IMAP asks for a provider');
+
+  await TestRenderer.act(async () => {
+    transportSelect().props.onChange({ target: { value: 'agent-mail' } });
+  });
+  const agentFields = fieldLabels(renderer);
+  assert.ok(!hasField(agentFields, '应用密码 / 授权码'),
+    'an Agent mailbox authorizes by QR code, so no password is collected');
+  assert.ok(!hasField(agentFields, '邮箱服务商'), 'it has no provider to choose');
+  assert.ok(hasField(agentFields, '邮箱地址'));
+  assert.ok(hasField(agentFields, '允许的发件人'));
+  renderer.unmount();
+});
+
+test('the Email connector submits the chosen transport', async () => {
+  const { EMAIL_SETTINGS_DEFINITION } = await import(
+    '../plugin-src/client/channels/email/index.js'
+  );
+  const submitted = [];
+  let renderer;
+  await TestRenderer.act(async () => {
+    renderer = TestRenderer.create(React.createElement(
+      EMAIL_SETTINGS_DEFINITION.CredentialPanel,
+      { busy: false, error: null, onSubmit: (v) => submitted.push(v), onCancel() {} },
+    ));
+  });
+
+  const texts = () => renderer.root.findAll((node) => node.type === 'input' || node.type === 'textarea');
+  // Address is the only text input in Agent mode.
+  const transportSelect = renderer.root.findAll((node) => node.type === 'select')
+    .find((select) => [...select.props.children]
+      .some((option) => option.props.value === 'agent-mail'));
+  await TestRenderer.act(async () => {
+    transportSelect.props.onChange({ target: { value: 'agent-mail' } });
+  });
+  const addressInput = texts().find((input) => input.props.type === 'email');
+  await TestRenderer.act(async () => {
+    addressInput.props.onChange({ target: { value: 'bot@agent.qq.com' } });
+  });
+  const allowlist = texts().find((input) => input.type === 'textarea');
+  await TestRenderer.act(async () => {
+    allowlist.props.onChange({ target: { value: 'boss@corp.com' } });
+  });
+  const connect = renderer.root.findAll((node) => node.type === 'button')
+    .find((b) => (b.children ?? []).includes('连接邮箱'));
+  await TestRenderer.act(async () => { connect.props.onClick(); });
+
+  assert.equal(submitted.length, 1);
+  assert.equal(submitted[0].transport, 'agent-mail');
+  assert.equal(submitted[0].address, 'bot@agent.qq.com');
+  assert.deepEqual(submitted[0].allowedSenders, ['boss@corp.com']);
+  assert.ok(!('password' in submitted[0]), 'no password is sent for the Agent mailbox');
+  renderer.unmount();
+});
