@@ -110,11 +110,17 @@ export function normalizeAgentMailMessage(raw) {
     subject: String(raw.subject ?? ''),
     text: typeof raw.body === 'string' ? raw.body : String(raw.snippet ?? ''),
     html: '',
+    // Field names follow what the runtime reads (`filename`/`size`/
+    // `contentType`); the API's own names live on the right, and the earlier
+    // aliases (`fileName`/`bytes`/`mediaType`) were simply ignored, so an
+    // inbound attachment arrived with no name, no size and no type.
     attachments: (Array.isArray(raw.attachments) ? raw.attachments : []).map((file) => ({
-      fileName: String(file?.filename ?? 'attachment'),
-      bytes: Number(file?.size) || 0,
-      mediaType: String(file?.content_type ?? 'application/octet-stream'),
+      filename: String(file?.filename ?? 'attachment'),
+      size: Number(file?.size) || 0,
+      ...(file?.content_type ? { contentType: String(file.content_type) } : {}),
       attachmentId: String(file?.attachment_id ?? ''),
+      // A large attachment exposes a download URL instead of an id.
+      ...(file?.download_url ? { downloadUrl: String(file.download_url) } : {}),
     })),
     headers: { get: () => undefined },
   };
@@ -330,19 +336,51 @@ export class AgentMailTransport {
       });
       const full = normalizeAgentMailMessage(document?.data ?? {});
       if (!full) return summary;
+      const attachments = full.attachments.length > 0 ? full.attachments : summary.attachments;
       return {
         ...summary,
         // The full read is the only place the thread id and body appear.
         messageId: full.messageId || summary.messageId,
         text: full.text || summary.text,
         html: full.html || summary.html,
-        attachments: full.attachments.length > 0 ? full.attachments : summary.attachments,
+        attachments: this.#withAttachmentContent(summary.uid, attachments),
         cc: full.cc.value.length > 0 ? full.cc : summary.cc,
       };
     } catch {
       // A failed read must not lose the mail; the snippet keeps it usable.
       return summary;
     }
+  }
+
+  /**
+   * Attach a content loader to each attachment.
+   *
+   * The transport contract asks for `content`, but the API exposes only an id,
+   * so the bytes are fetched from `attachment +download` on demand. A failed
+   * download leaves that attachment without content rather than losing the
+   * message — its name and size are still reported.
+   */
+  #withAttachmentContent(messageId, attachments) {
+    if (!Array.isArray(attachments) || attachments.length === 0) return [];
+    return attachments.map((file) => ({
+      ...file,
+      content: async () => {
+        if (!file.attachmentId) return undefined;
+        try {
+          const { document } = await this.#call([
+            'attachment', '+download',
+            '--msg', messageId,
+            '--att', file.attachmentId,
+          ], { signal: this.#signal });
+          const saved = document?.data?.saved_to;
+          if (!saved) return undefined;
+          const { readFile } = await import('node:fs/promises');
+          return await readFile(saved);
+        } catch {
+          return undefined;
+        }
+      },
+    }));
   }
 
   /** Reply, threading on the message's own RFC id. */
@@ -386,15 +424,57 @@ export class AgentMailTransport {
   async #uploadAttachments(attachments) {
     const ids = [];
     for (const file of attachments) {
-      const path = file?.path ?? file?.filePath;
-      if (!path) continue;
-      const { document } = await this.#call(['attachment', '+upload', '--file', path], {
-        signal: this.#signal,
-      });
-      const id = String(document?.data?.attachment_id ?? '').trim();
-      if (id) ids.push(id);
+      // A path can be uploaded directly; the runtime hands over bytes instead
+      // (`{ filename, content, contentType }`), which must be written out
+      // first — the earlier version read only `path`, skipped every real
+      // attachment, and the send still reported success.
+      let path = file?.path ?? file?.filePath ?? null;
+      let cleanup = null;
+      if (!path) {
+        const bytes = file?.content ?? file?.bytes ?? file?.data;
+        if (!bytes) {
+          throw new AgentMailCliError(
+            `attachment ${String(file?.filename ?? '(unnamed)')} has neither a path nor content`,
+            { code: 'attachment-unreadable' },
+          );
+        }
+        const written = await this.#writeTempAttachment(file?.filename, bytes);
+        if (!written) {
+          throw new AgentMailCliError(
+            `attachment ${String(file?.filename ?? '(unnamed)')} could not be staged for upload`,
+            { code: 'attachment-unwritable' },
+          );
+        }
+        ({ path, cleanup } = written);
+      }
+      try {
+        const { document } = await this.#call(['attachment', '+upload', '--file', path], {
+          signal: this.#signal,
+        });
+        const id = String(document?.data?.attachment_id ?? '').trim();
+        if (id) ids.push(id);
+      } finally {
+        if (cleanup) await cleanup();
+      }
     }
     return ids;
+  }
+
+  /** Write attachment bytes to a temp file so the CLI can upload them. */
+  async #writeTempAttachment(filename, bytes) {
+    try {
+      const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const { join, basename } = await import('node:path');
+      const dir = await mkdtemp(join(tmpdir(), 'dsh-email-att-'));
+      const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+      const safe = basename(String(filename ?? 'attachment')).replace(/[^\w.-]/g, '_') || 'attachment';
+      const path = join(dir, safe);
+      await writeFile(path, buffer);
+      return { path, cleanup: () => rm(dir, { recursive: true, force: true }).catch(() => {}) };
+    } catch {
+      return null;
+    }
   }
 
   /**

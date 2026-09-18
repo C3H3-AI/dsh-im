@@ -289,6 +289,9 @@ export class EmailRuntime {
   #credential = null;
   #onTokensRefreshed;
   #status = createEmailRuntimeStatus();
+  // Turns started by the poll loop, kept so `stop()` can wait for them and so
+  // a failure is reported instead of surfacing as an unhandled rejection.
+  #deliveries = new Set();
   #api;
   #bridge;
   #abortController;
@@ -449,6 +452,9 @@ export class EmailRuntime {
     this.#abortController?.abort();
     await this.#polling?.catch(() => {});
     this.#polling = null;
+    // Deliveries are no longer awaited by the poll loop, so shutdown waits for
+    // them here instead of dropping a turn mid-flight.
+    await this.whenIdle();
     const api = this.#api;
     this.#api = null;
     this.#bridge = null;
@@ -462,6 +468,38 @@ export class EmailRuntime {
       this.#polling = this.#poll().finally(() => this.#schedulePoll(this.#pollIntervalMs));
     }, delay);
     this.#timer.unref?.();
+  }
+
+  /**
+   * Start a delivery without blocking the poll loop.
+   *
+   * The promise is retained rather than dropped: `stop()` waits on the set, and
+   * a rejection is logged here so it cannot become an unhandled rejection.
+   */
+  #track(promise) {
+    if (!promise || typeof promise.then !== 'function') return;
+    const task = promise
+      .catch((error) => {
+        if (this.#stopped) return;
+        this.#status.lastMessageError = this.#safeMessageError(error);
+        this.#logger.warn?.('[dsh-im:email] delivery failed', error);
+      })
+      .finally(() => { this.#deliveries.delete(task); });
+    this.#deliveries.add(task);
+  }
+
+  /** Wait for the deliveries started by the poll loop. */
+  async whenIdle() {
+    while (this.#deliveries.size > 0) {
+      await Promise.allSettled([...this.#deliveries]);
+    }
+  }
+
+  /** A short, log-safe description of a delivery failure. */
+  #safeMessageError(error) {
+    const code = typeof error?.code === 'string' ? error.code : null;
+    const message = typeof error?.message === 'string' ? error.message : '';
+    return { code: code ?? 'delivery-failed', message: message.slice(0, 200) };
   }
 
   async #poll() {
@@ -496,7 +534,12 @@ export class EmailRuntime {
           for (const id of [message.messageId, ...message.replyTarget.references]) {
             this.#state.rememberThreadId(id, message.conversationId);
           }
-          await this.#bridge.accept(message);
+          // Deliberately not awaited. `accept` resolves only when the whole
+          // Harness turn finishes, and a turn that is waiting for an approval
+          // or an answer blocks the poll loop — so later mail stayed unread
+          // until someone replied. The bridge already serialises per
+          // conversation, so ordering is preserved without waiting here.
+          this.#track(this.#bridge.accept(message));
         }
         if (seenKey) await this.#state.markSeen(seenKey);
         if (uid !== undefined && uid !== null && uid !== '' && uid !== cursor) {

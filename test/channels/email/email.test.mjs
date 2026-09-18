@@ -1515,3 +1515,141 @@ test('an allowlisted sender may execute without a confirming reply', async () =>
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+test('a turn waiting on approval does not stop later mail being read', async () => {
+  // `accept` resolves only when the Harness turn ends, and a turn waiting for
+  // an approval never ends until someone replies — so awaiting it in the poll
+  // loop left every later message unread.
+  const { EmailRuntime } = await import('../../../src/channels/email/email-runtime.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-block-'));
+  try {
+    const state = await new EmailStateStore(join(dir, 'state.json')).load();
+    const mail = (n) => ({
+      uid: `msg_${n}`, messageId: `<rfc-${n}@x>`,
+      from: { value: [{ address: 'a@x.com' }] },
+      to: { value: [{ address: 'b@y.com' }] },
+      cc: { value: [] }, subject: `S${n}`, text: `body ${n}`, attachments: [],
+    });
+    const runtime = new EmailRuntime({
+      config: { platformId: 'b@y.com', transport: 'agent-mail', allowedSenders: ['a@x.com'] },
+      harness: { ensureRunning: async () => {} },
+      state,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      pollIntervalMs: 30,
+      createApi: () => ({
+        connect: async () => {}, disconnect: async () => {}, latestUid: async () => 'msg_2',
+        listMessages: async () => [mail(1), mail(2)],
+        sendReply: async () => {}, sendText: async () => {},
+      }),
+    });
+    await runtime.start();
+    // A turn that never settles, as one waiting for approval would be.
+    if (runtime.bridge) runtime.bridge.accept = () => new Promise(() => {});
+
+    const firstCheck = runtime.status.lastCheckedAt;
+    await new Promise((resolve) => { setTimeout(resolve, 300); });
+    assert.notEqual(runtime.status.lastCheckedAt, firstCheck,
+      'the poll loop keeps running while a turn is parked');
+
+    // Shutdown must not hang on the parked delivery either.
+    const stopped = await Promise.race([
+      runtime.stop().then(() => true).catch(() => true),
+      new Promise((resolve) => { setTimeout(() => resolve(false), 2_000); }),
+    ]);
+    assert.equal(stopped, true, 'stop() does not wait forever on a parked turn');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('an agent attachment carries the fields the runtime reads', async () => {
+  // The API names differ from the runtime's: an inbound attachment used to
+  // arrive with no name, no size and no type because the wrong keys were set.
+  const { createAgentMailTransportForTests } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const cli = (args) => {
+    const reply = (data) => Promise.resolve({
+      document: { ok: true, data }, stdout: '', stderr: '', exitCode: 0,
+    });
+    if (args[0] === 'message' && args[1] === '+list') {
+      return reply({ data: [{ message_id: 'msg_1', subject: 'S', from: { email: 'a@x.com' } }], pagination: {} });
+    }
+    return reply({
+      message_id: 'msg_1', rfc_message_id: '<rfc-1@x>', body: 'hi',
+      from: { email: 'a@x.com' }, subject: 'S',
+      attachments: [{ attachment_id: 'att_1', filename: 'report.pdf',
+        size: 2048, content_type: 'application/pdf' }],
+    });
+  };
+  const transport = createAgentMailTransportForTests({
+    config: { address: 'bot@agent.qq.com' }, runCliImpl: cli,
+  });
+  const [message] = await transport.listMessages({ afterUid: null, limit: 5 });
+  const [file] = message.attachments;
+  assert.equal(file.filename, 'report.pdf', 'the runtime reads `filename`');
+  assert.equal(file.size, 2048, 'the runtime reads `size`');
+  assert.equal(file.contentType, 'application/pdf', 'the runtime reads `contentType`');
+  assert.equal(typeof file.content, 'function', 'the contract asks for content');
+});
+
+test('a byte attachment is staged before upload, not silently skipped', async () => {
+  // The runtime hands over bytes; the uploader only understood a path, so the
+  // attachment vanished while the send still reported success.
+  const { createAgentMailTransportForTests } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const staged = [];
+  const cli = (args) => {
+    const reply = (data) => Promise.resolve({
+      document: { ok: true, data }, stdout: '', stderr: '', exitCode: 0,
+    });
+    if (args[0] === 'attachment' && args[1] === '+upload') {
+      staged.push(args[args.indexOf('--file') + 1]);
+      return reply({ attachment_id: 'att_up_1' });
+    }
+    if (args.includes('--confirmation-token')) return reply({ queued: true });
+    return reply({ confirmation_required: true, confirmation_token: 'ct_1' });
+  };
+  const transport = createAgentMailTransportForTests({
+    config: { address: 'bot@agent.qq.com' }, runCliImpl: cli,
+  });
+  const result = await transport.sendReply({
+    to: 'a@x.com', subject: 'Re: S', text: 'see attached',
+    transportMessageId: 'msg_1',
+    attachments: [{ filename: 'notes.txt', content: Buffer.from('hello'), contentType: 'text/plain' }],
+  });
+  assert.equal(result.sent, true);
+  assert.equal(staged.length, 1, 'the attachment was uploaded');
+  assert.ok(staged[0].endsWith('notes.txt'), 'staged under its own name');
+
+  // An attachment with neither path nor bytes must not be swallowed.
+  await assert.rejects(
+    () => transport.sendReply({
+      to: 'a@x.com', subject: 'Re: S', text: 'x',
+      transportMessageId: 'msg_1', attachments: [{ filename: 'empty.bin' }],
+    }),
+    (error) => error.code === 'attachment-unreadable',
+  );
+});
+
+test('a mail thread survives a restart', async () => {
+  // The Message-ID → conversation map lived only in memory, so after a reload a
+  // reply on the same thread started a new session while the original one sat
+  // orphaned.
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-thread-'));
+  try {
+    const path = join(dir, 'state.json');
+    const first = await new EmailStateStore(path).load();
+    first.rememberThreadId('<rfc-1@x>', 'direct:<rfc-1@x>');
+    await first.persist();
+
+    // A fresh instance, as a plugin reload would build.
+    const reloaded = await new EmailStateStore(path).load();
+    assert.equal(reloaded.conversationForThreadId('<rfc-1@x>'), 'direct:<rfc-1@x>',
+      'the thread mapping is restored');
+    assert.equal(reloaded.threadMap.size, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});

@@ -13,27 +13,48 @@ const MAX_THREAD_IDS = 2_000;
 export const BOUND_KEY_PREFIX = 'bound:';
 
 export class EmailStateStore extends ConversationStateStore {
-  #threadIds = new Map();
+  // Loaded from persisted state on first use. Held in memory because threading
+  // reads it synchronously, and written back on every change so a restart does
+  // not turn a continuing thread into a brand-new conversation.
+  #threadIds = null;
+
+  /** The Message-ID → conversation map, loaded once from persisted state. */
+  #threads() {
+    if (this.#threadIds) return this.#threadIds;
+    const stored = this.extensionState().threadIds;
+    const map = new Map();
+    if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+      for (const [id, key] of Object.entries(stored)) {
+        if (typeof id === 'string' && id && typeof key === 'string' && key) map.set(id, key);
+      }
+    }
+    this.#threadIds = map;
+    return map;
+  }
 
   /** Record that `messageId` belongs to `conversationKey`. */
   rememberThreadId(messageId, conversationKey) {
     if (typeof messageId !== 'string' || !messageId || typeof conversationKey !== 'string') return;
+    const threads = this.#threads();
     // Re-insert so the freshest ids survive eviction.
-    this.#threadIds.delete(messageId);
-    this.#threadIds.set(messageId, conversationKey);
-    while (this.#threadIds.size > MAX_THREAD_IDS) {
-      this.#threadIds.delete(this.#threadIds.keys().next().value);
+    threads.delete(messageId);
+    threads.set(messageId, conversationKey);
+    while (threads.size > MAX_THREAD_IDS) {
+      threads.delete(threads.keys().next().value);
     }
+    // Persisted, so a reply arriving after a restart still joins its thread.
+    this.extensionState().threadIds = Object.fromEntries(threads);
+    void this.persist();
   }
 
   /** Conversation key previously associated with this Message-ID, if any. */
   conversationForThreadId(messageId) {
-    return this.#threadIds.get(messageId) ?? null;
+    return this.#threads().get(messageId) ?? null;
   }
 
   /** Read-only view used by the threading resolver. */
   get threadMap() {
-    return this.#threadIds;
+    return this.#threads();
   }
 
   /**
