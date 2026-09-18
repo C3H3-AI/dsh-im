@@ -323,10 +323,11 @@ export class AgentMailTransport {
     to, subject, text, transportMessageId, references, attachments = [], headers,
   } = {}) {
     const body = this.#composeBody(text);
+    // The CLI takes the text through --body; `--body-file -` is read as a
+    // literal filename and fails with ENOENT.
     const args = [
       'message', '+reply',
       '--id', String(transportMessageId ?? ''),
-      '--body-file', '-',
     ];
     if (attachments.length > 0) {
       const uploaded = await this.#uploadAttachments(attachments);
@@ -339,7 +340,7 @@ export class AgentMailTransport {
   /** Send a new message rather than a reply. */
   async sendText({ to, subject, text, attachments = [], headers } = {}) {
     const body = this.#composeBody(text);
-    const args = ['message', '+send', '--to', String(to ?? ''), '--body-file', '-'];
+    const args = ['message', '+send', '--to', String(to ?? '')];
     if (subject) args.push('--subject', String(subject));
     if (attachments.length > 0) {
       const uploaded = await this.#uploadAttachments(attachments);
@@ -376,16 +377,17 @@ export class AgentMailTransport {
    * arguments plus that token performs the send.
    */
   async #withConfirmation(args, body, headers) {
-    const extra = headers && typeof headers === 'object'
-      ? Object.entries(headers).flatMap(([name, value]) => (value === undefined || value === null
-        ? [] : ['--header', `${name}: ${value}`]))
-      : [];
-    const first = await this.#call([...args, ...extra], { input: body, signal: this.#signal });
+    // agently-cli exposes no --header flag; extra headers are dropped rather
+    // than passed as an argument it would reject.
+    // The body travels as an argument: `--body-file -` is read as a literal
+    // filename and fails with ENOENT, so stdin is not an option here.
+    const withBody = [...args, '--body', body];
+    const first = await this.#call(withBody, { signal: this.#signal });
     const token = String(first.document?.data?.confirmation_token ?? '').trim();
     if (!token) return first.document;
     const confirmed = await this.#call(
-      [...args, ...extra, '--confirmation-token', token],
-      { input: body, signal: this.#signal },
+      [...withBody, '--confirmation-token', token],
+      { signal: this.#signal },
     );
     return confirmed.document;
   }

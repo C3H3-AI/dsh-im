@@ -1229,7 +1229,11 @@ test('a reply completes the CLI two-step confirmation', async () => {
   assert.equal(sends.length, 2, 'the send is retried once with the token');
   assert.ok(sends[1].args.includes('--confirmation-token'));
   assert.ok(sends[1].args.includes('ct_1'));
-  assert.equal(sends[0].input, 'hello', 'the body travels on stdin, not argv');
+  // `--body-file -` is read as a literal filename by the CLI, so the text has
+  // to travel as an argument.
+  const bodyAt = sends[0].args.indexOf('--body');
+  assert.ok(bodyAt >= 0, 'the body is passed with --body');
+  assert.equal(sends[0].args[bodyAt + 1], 'hello');
 });
 
 test('a CLI failure surfaces its own message, not the exit code', async () => {
