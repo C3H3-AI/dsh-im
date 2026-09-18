@@ -1986,3 +1986,85 @@ test('saving the allowlist refreshes the per-sender rows', async () => {
     'a newly allowed sender gets a row');
   renderer.unmount();
 });
+
+test('a bound agent mailbox offers re-authorization', async () => {
+  // agently-cli holds the login and it can lapse. Reconnecting cannot fix
+  // that, so the card must offer the scan again — otherwise the only way back
+  // was to remove and re-add the mailbox.
+  const { EMAIL_SETTINGS_DEFINITION } = await import(
+    '../plugin-src/client/channels/email/index.js'
+  );
+  const textOf = (node) => {
+    if (typeof node === 'string') return node;
+    if (Array.isArray(node)) return node.map(textOf).join('');
+    if (node?.children) return textOf(node.children);
+    return '';
+  };
+  const called = [];
+  let renderer;
+  await TestRenderer.act(async () => {
+    renderer = TestRenderer.create(React.createElement(
+      EMAIL_SETTINGS_DEFINITION.AccountSettings,
+      {
+        account: {
+          botId: 'e1', platformId: 'diyhome@agent.qq.com', transport: 'agent-mail',
+          allowedSenders: ['a@x.com'], connected: false,
+        },
+        busy: false, error: null, onSave: async () => {}, onCancel() {},
+        rpcCall: async (endpoint, payload) => { called.push({ endpoint, payload }); return { ok: true, value: {} }; },
+        endpoints: {
+          startAuth: 'bot.auth.start', pollAuth: 'bot.auth.poll',
+          listSessions: 'bot.session.list', getBinding: 'bot.session-binding.get',
+          setBinding: 'bot.session-binding.set',
+        },
+        onChanged: async () => {},
+      },
+    ));
+  });
+  const button = renderer.root.findAll((node) => node.type === 'button')
+    .find((b) => textOf(b.children) === '重新扫码授权');
+  assert.ok(button, 'a bound Agent mailbox offers re-authorization');
+
+  await TestRenderer.act(async () => { button.props.onClick(); });
+  const start = called.find((c) => c.endpoint === 'bot.auth.start');
+  assert.ok(start, 'the scan is started');
+  assert.equal(start.payload.workspace, 'diyhome@agent.qq.com',
+    'the scan lands in the workspace this mailbox reads from');
+  renderer.unmount();
+});
+
+test('an IMAP mailbox is not offered re-authorization', async () => {
+  const { EMAIL_SETTINGS_DEFINITION } = await import(
+    '../plugin-src/client/channels/email/index.js'
+  );
+  const textOf = (node) => {
+    if (typeof node === 'string') return node;
+    if (Array.isArray(node)) return node.map(textOf).join('');
+    if (node?.children) return textOf(node.children);
+    return '';
+  };
+  let renderer;
+  await TestRenderer.act(async () => {
+    renderer = TestRenderer.create(React.createElement(
+      EMAIL_SETTINGS_DEFINITION.AccountSettings,
+      {
+        account: {
+          botId: 'e2', platformId: 'me@qq.com', transport: 'imap-smtp',
+          allowedSenders: ['a@x.com'], connected: true,
+        },
+        busy: false, error: null, onSave: async () => {}, onCancel() {},
+        rpcCall: async () => ({ ok: true, value: {} }),
+        endpoints: {
+          startAuth: 'bot.auth.start', pollAuth: 'bot.auth.poll',
+          listSessions: 'bot.session.list', getBinding: 'bot.session-binding.get',
+          setBinding: 'bot.session-binding.set',
+        },
+        onChanged: async () => {},
+      },
+    ));
+  });
+  const labels = renderer.root.findAll((node) => node.type === 'button').map((b) => textOf(b.children));
+  assert.ok(!labels.includes('重新扫码授权'),
+    'a password mailbox has nothing to re-authorize');
+  renderer.unmount();
+});

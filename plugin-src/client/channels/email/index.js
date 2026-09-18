@@ -548,7 +548,65 @@ function SessionBindingPanel({
 }
 
 /** Per-account settings: edit hosts and the allowlist without reconnecting. */
+/**
+ * Re-authorize an already-bound Agent mailbox.
+ *
+ * agently-cli holds the login, and it can expire or be dropped. Reconnecting
+ * cannot fix that — the login itself has to be renewed — so the same scan the
+ * add form uses is offered here.
+ */
+function MailboxReauthorize({ address, disabled, rpcCall, endpoints, onDone }) {
+  const [done, setDone] = React.useState(false);
+  const invoke = React.useCallback(async (endpoint, payload) => {
+    const response = await rpcCall(endpoint, payload);
+    if (response && typeof response === 'object' && 'ok' in response) {
+      if (response.ok === false) throw new Error(response.error?.message ?? '请求失败');
+      return response.value;
+    }
+    return response;
+  }, [rpcCall]);
+
+  // The scan happens in another tab or on a phone, so the outcome is polled.
+  React.useEffect(() => {
+    if (!done) return undefined;
+    let cancelled = false;
+    const timer = setInterval(async () => {
+      try {
+        const result = await invoke(endpoints.pollAuth, {});
+        if (cancelled || !result?.authorized) return;
+        clearInterval(timer);
+        await onDone?.({ silent: true });
+      } catch {
+        // A failed poll keeps waiting; the scan may still be in flight.
+      }
+    }, 3_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [done, endpoints, invoke, onDone]);
+
+  return h('div', { className: 'dim-emailAuth' },
+    h('p', { className: 'dim-emailHint' },
+      done
+        ? '已生成授权链接：在打开的页面里用微信扫码并确认，连接会自动恢复。'
+        : '当前邮箱的授权已失效。重新扫码即可恢复，无需移除这个邮箱。'),
+    done
+      ? h('p', { className: 'dim-emailHint' }, '等待扫码完成…')
+      : null,
+    h('div', { className: 'ddt-actions dim-viewActions' },
+      h('button', {
+        type: 'button', className: 'ddt-button', disabled,
+        onClick: async () => {
+          // The address doubles as the CLI workspace, so the scan lands in the
+          // same one this mailbox reads from.
+          await invoke(endpoints.startAuth, { transport: 'agent-mail', workspace: address });
+          setDone(true);
+        },
+      }, done ? '重新生成' : '重新扫码授权')));
+}
+
 function MailboxSettings({ account, busy, error, onSave, onCancel, rpcCall, endpoints, onChanged }) {
+  // The settings panel shows the re-authorize control only for the transport
+  // that authorizes out of band.
+  const isAgentMail = (account?.transport ?? 'imap-smtp') === 'agent-mail';
   const [allowedSenders, setAllowedSenders] = React.useState(
     (account?.allowedSenders ?? []).join('\n'),
   );
@@ -563,6 +621,17 @@ function MailboxSettings({ account, busy, error, onSave, onCancel, rpcCall, endp
     await bindingReload.current?.();
   };
   return h('section', { className: 'dim-emailPanel' },
+    // An Agent mailbox authorizes against agently-cli, whose login can lapse.
+    // Without this the only way back was to remove and re-add the mailbox.
+    isAgentMail
+      ? h(MailboxReauthorize, {
+        address: account?.platformId ?? '',
+        disabled: busy,
+        rpcCall,
+        endpoints,
+        onDone: onChanged,
+      })
+      : null,
     h('div', { className: 'dim-emailFields' },
       field('允许的发件人', h('textarea', {
         value: allowedSenders, disabled: busy,
