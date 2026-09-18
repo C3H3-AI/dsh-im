@@ -142,11 +142,9 @@ if (client.includes('settings.plugins.tab') || clientSources.includes('settings.
   throw new Error('client source or bundle still contains the legacy Plugins-tab settings entry');
 }
 // Connections still have no channel-enable toggle. Checkable inputs are owned
-// only by the shared context editor, the saved-target Session sync row, and the
-// email mailbox's own approval choice. The context editor contains one switch
-// template and one mapped field-input template; the delivery target adds one
-// ordinary checkbox template; the email settings panel adds one checkbox for
-// auto-approving allowlisted senders.
+// only by the shared context editor and the saved-target Session sync row.
+// The context editor contains one switch template and one mapped field-input
+// template; the delivery target adds one ordinary checkbox template.
 const contextEditorSource = await readFile(resolve(root, 'plugin-src/client/context-enhancement.js'), 'utf8');
 const deliverySettingsSource = await readFile(resolve(root, 'plugin-src/client/delivery-settings.js'), 'utf8');
 const emailSettingsSource = await readFile(resolve(root, 'plugin-src/client/channels/email/index.js'), 'utf8');
@@ -158,7 +156,7 @@ if (/role:\s*["']switch|type:\s*["']checkbox/.test(otherClientSources)
   || (deliverySettingsSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
   || /role:\s*["']switch["']/u.test(deliverySettingsSource)
   || (client.match(/role:\s*["']switch["']/g) ?? []).length !== 1
-  || (client.match(/type:\s*["']checkbox["']/g) ?? []).length !== 4) {
+  || (client.match(/type:\s*["']checkbox["']/g) ?? []).length !== 3) {
   throw new Error('checkable inputs must be limited to context enhancement and Session sync');
 }
 for (const marker of ['bot.context-enhancement.set', '<dsh_im_source>', '<dsh_im_source_guidance>']) {

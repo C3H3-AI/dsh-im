@@ -114,7 +114,7 @@ function normalizeEmailBotExtension(value) {
   const provider = typeof value.provider === 'string' ? value.provider.trim() : undefined;
   const present = [
     'transport', 'provider', 'imapHost', 'imapPort', 'smtpHost', 'smtpPort',
-    'allowedSenders', 'autoApprove',
+    'allowedSenders',
   ];
   if (!present.some((key) => Object.hasOwn(value, key))) return {};
   const preset = EMAIL_PROVIDERS[provider] ?? null;
@@ -131,10 +131,6 @@ function normalizeEmailBotExtension(value) {
       smtpHost: normalizeHost(value.smtpHost, 'smtpHost') ?? preset?.smtpHost,
       smtpPort: normalizePort(value.smtpPort, preset?.smtpPort ?? 465, 'smtpPort'),
       allowedSenders: policy.allowedSenders,
-      // Whether an allowlisted sender's request is approved without a
-      // confirming reply. Off by default: mail is forgeable, so a human
-      // answer stays the safer default.
-      autoApprove: value.autoApprove === true,
     };
   } catch {
     return null;

@@ -1403,22 +1403,47 @@ test('each agent mailbox authorizes in its own CLI workspace', async () => {
   }
 });
 
-test('a mailbox falls back to the CLI default workspace', async () => {
-  // agently-cli separates accounts per workspace. With a single authorized
-  // account every mailbox belongs to it, so pinning each one to a workspace
-  // nobody logged into reported "authorization required" instead of working.
+test('falling back to another account is refused', async () => {
+  // The CLI separates accounts per workspace, so a fallback to the default is
+  // only safe when that login owns this address. Accepting someone else's
+  // login would send this mailbox's replies from the wrong sender.
   const { createAgentMailTransportForTests } = await import(
     '../../../src/channels/email/transports/agent-mail.mjs'
   );
-  const seen = [];
   const cli = (args, options = {}) => {
-    seen.push({ args, workspace: options.env?.AGENTLY_WORKSPACE ?? null });
     if (args[0] === 'auth' && args[1] === 'status') {
-      // The mailbox's own workspace has no login.
+      // This mailbox's own workspace has no login.
       return Promise.resolve({ document: { ok: true, data: { logged_in: false } }, stdout: '', stderr: '', exitCode: 0 });
     }
     return Promise.resolve({
-      document: { ok: true, data: { aliases: [{ alias_id: 'A1', email: 'real@agent.qq.com', is_primary: true }] } },
+      document: { ok: true, data: { aliases: [{ alias_id: 'A1', email: 'someone-else@agent.qq.com', is_primary: true }] } },
+      stdout: '', stderr: '', exitCode: 0,
+    });
+  };
+  const transport = createAgentMailTransportForTests({
+    config: { address: 'pinned@agent.qq.com' }, runCliImpl: cli,
+  });
+  await assert.rejects(
+    () => transport.connect(),
+    (error) => {
+      assert.equal(error.code, 'identity-mismatch');
+      assert.match(error.message, /someone-else@agent\.qq\.com/);
+      return true;
+    },
+    'a login that owns a different address must not be adopted',
+  );
+});
+
+test('a mailbox uses its own workspace identity', async () => {
+  const { createAgentMailTransportForTests } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const cli = (args) => {
+    if (args[0] === 'auth' && args[1] === 'status') {
+      return Promise.resolve({ document: { ok: true, data: { logged_in: true } }, stdout: '', stderr: '', exitCode: 0 });
+    }
+    return Promise.resolve({
+      document: { ok: true, data: { aliases: [{ alias_id: 'A2', email: 'pinned@agent.qq.com', is_primary: true }] } },
       stdout: '', stderr: '', exitCode: 0,
     });
   };
@@ -1426,10 +1451,7 @@ test('a mailbox falls back to the CLI default workspace', async () => {
     config: { address: 'pinned@agent.qq.com' }, runCliImpl: cli,
   });
   await transport.connect();
-  assert.equal(transport.address, 'real@agent.qq.com');
-  const meCall = seen.find((c) => c.args[0] === '+me');
-  // No AGENTLY_WORKSPACE at all means the CLI uses its own default.
-  assert.ok(!meCall.workspace, 'the call falls back to the CLI default');
+  assert.equal(transport.address, 'pinned@agent.qq.com', 'the matching address is accepted');
 });
 
 test('a mailbox uses its own workspace when it has a login', async () => {
@@ -1456,83 +1478,6 @@ test('a mailbox uses its own workspace when it has a login', async () => {
   assert.equal(meCall.workspace, 'pinned@agent.qq.com', 'its own workspace wins when it has a login');
 });
 
-test('autoApprove is opt-in and survives a round trip', async () => {
-  // Mail is forgeable, so skipping the confirming reply must be deliberate.
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-auto-'));
-  try {
-    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
-    await store.save({ platformId: 'a@agent.qq.com', transport: 'agent-mail', allowedSenders: ['x@y.com'] });
-    assert.equal(store.list()[0].autoApprove, false, 'off by default');
 
-    await store.save({ platformId: 'b@agent.qq.com', transport: 'agent-mail',
-      allowedSenders: ['x@y.com'], autoApprove: true });
-    const saved = store.list().find((b) => b.platformId === 'b@agent.qq.com');
-    assert.equal(saved.autoApprove, true, 'the choice is persisted');
-  } finally {
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-});
 
-test('the mailbox update endpoint accepts autoApprove', async () => {
-  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-auto2-'));
-  try {
-    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
-    const controller = new EmailController({
-      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
-      configStore: store,
-      logger: { warn() {}, info() {}, error() {}, log() {} },
-      transports: { 'imap-smtp': makeStubTransport, 'agent-mail': makeStubTransport },
-      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
-    });
-    await controller.bindMailbox({
-      address: 'a@agent.qq.com', transport: 'agent-mail', allowedSenders: ['x@y.com'],
-    });
-    const [bot] = store.list();
-    await controller.updateMailboxSettings(bot.botId, { autoApprove: true });
-    assert.equal(store.getByPlatformId('a@agent.qq.com').autoApprove, true);
-    await controller.updateMailboxSettings(bot.botId, { autoApprove: false });
-    assert.equal(store.getByPlatformId('a@agent.qq.com').autoApprove, false);
-  } finally {
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-});
 
-test('an auto-approving mailbox only trusts its own allowlist', async () => {
-  // Mail is forgeable, so the exemption must follow the allowlist exactly: the
-  // listed sender passes, anyone else does not, and the check is
-  // case-insensitive because addresses are.
-  const { allowlistApproval } = await import('../../../src/channels/email/email-runtime.mjs');
-  const approve = allowlistApproval({ autoApprove: true, allowedSenders: ['Boss@Corp.com'] });
-  assert.equal(approve('boss@corp.com'), true, 'the listed sender is trusted');
-  assert.equal(approve('BOSS@CORP.COM'), true, 'case does not matter');
-  assert.equal(approve('stranger@evil.com'), false, 'anyone else is not');
-  assert.equal(approve(''), false, 'an empty sender is not');
-  assert.equal(allowlistApproval({ autoApprove: false, allowedSenders: ['a@b.com'] })('a@b.com'), false,
-    'a mailbox without the setting never auto-approves');
-});
-
-test('the mailbox status reports the saved approval choice', async () => {
-  // The settings checkbox reads it from the snapshot; when the field was
-  // missing the form opened unchecked and disagreed with the Host.
-  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-auto4-'));
-  try {
-    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
-    const controller = new EmailController({
-      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
-      configStore: store,
-      logger: { warn() {}, info() {}, error() {}, log() {} },
-      transports: { 'imap-smtp': makeStubTransport, 'agent-mail': makeStubTransport },
-      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
-    });
-    const status = await controller.bindMailbox({
-      address: 'a@agent.qq.com', transport: 'agent-mail',
-      allowedSenders: ['x@y.com'], autoApprove: true,
-    });
-    const bot = status.bots.find((b) => b.platformId.includes('agent'));
-    assert.equal(bot.autoApprove, true, 'the saved choice is reported');
-  } finally {
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-});

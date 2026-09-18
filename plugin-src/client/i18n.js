@@ -1059,8 +1059,6 @@ const EN = Object.freeze({
   '授权后自动填入': 'Filled in after authorization',
   '由授权结果自动填入，无需手工填写。': 'Filled in from the authorization; no need to type it.',
   '刷新会话列表': 'Refresh the session list',
-  '自动批准': 'Approve automatically',
-  '开启后，白名单内发件人的请求直接执行，不再回信确认；关闭时每封来信需要回复确认。': 'When on, an allowlisted sender\'s request runs at once instead of waiting for a confirming reply.',
   '腾讯 Agent 邮箱需要微信扫码授权。点下面的按钮生成授权链接，在打开的页面里用微信扫码登录并确认。': 'The Tencent Agent mailbox authorizes with a WeChat QR code. Generate an authorization link, then scan it with WeChat on the page that opens and confirm.',
   '请求失败': 'The request failed',
 });

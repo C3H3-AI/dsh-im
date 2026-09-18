@@ -170,8 +170,17 @@ export class AgentMailTransport {
    * stranger answering them.
    */
   async #assertIdentity(address) {
-    const wanted = normalizeAddress(this.#config.platformId);
-    if (!wanted || address === wanted) return;
+    // Callers pass the mailbox as `address` (the runtime and the bind probe
+    // both do); `platformId` is the same value under its config-store name.
+    // Reading only one of them left `wanted` empty and skipped the check.
+    const wanted = normalizeAddress(this.#config.address) || normalizeAddress(this.#config.platformId);
+    if (!wanted) {
+      throw new AgentMailCliError(
+        'the mailbox address is unknown, so the CLI login cannot be verified',
+        { code: 'identity-unknown' },
+      );
+    }
+    if (address === wanted) return;
     throw new AgentMailCliError(
       `agently-cli is logged in as ${address}, not ${wanted}; authorize this mailbox separately`,
       { code: 'identity-mismatch' },
@@ -252,7 +261,10 @@ export class AgentMailTransport {
    * filtered first so an unlisted address costs no extra call.
    */
   async listMessages({ afterUid = null, limit = DEFAULT_PAGE_SIZE, allowSenders = null } = {}) {
-    const allowed = allowSenders instanceof Set && allowSenders.size > 0 ? allowSenders : null;
+    // A Set — even an empty one — means the caller supplied a policy: an
+    // empty allowlist admits nobody, so no body is fetched at all. Treating
+    // it as "no filter" downloaded mail the policy had already refused.
+    const allowed = allowSenders instanceof Set ? allowSenders : null;
     const collected = [];
     let cursor = '';
 
@@ -262,17 +274,30 @@ export class AgentMailTransport {
       const { document } = await this.#call(args, { signal: this.#signal });
       const items = Array.isArray(document?.data?.data) ? document.data.data : [];
 
-      for (const raw of items) {
+      // The API lists newest-first, so a page is reversed into age order before
+      // the limit applies. Taking the newest `limit` entries instead skipped the
+      // older backlog: with 30 messages pending and a limit of 25, the five
+      // oldest were never delivered, and the cursor then advanced past them.
+      const pageItems = items.slice().reverse();
+      let reachedHandled = false;
+      for (const raw of pageItems) {
         const id = String(raw?.message_id ?? '').trim();
         if (!id) continue;
-        // The cursor is the newest already-handled id: everything before it in
-        // the list is newer, so reaching it means the rest is history.
+        // The cursor is the newest already-handled id: it is skipped, and
+        // everything newer than it (already collected) is kept. Breaking here
+        // instead returned an empty page whenever the cursor was the oldest
+        // entry on the page — which is the common case.
         if (afterUid !== null && afterUid !== undefined && id === String(afterUid)) {
-          return this.#oldestFirst(collected, allowed);
+          reachedHandled = true;
+          continue;
         }
         if (allowed && !allowed.has(normalizeAddress(raw?.from?.email))) continue;
         collected.push(raw);
-        if (collected.length >= limit) return this.#oldestFirst(collected, allowed);
+      }
+      // Returning only on the limit is what lost the backlog: the oldest
+      // unhandled batch is returned, and the cursor follows it forward.
+      if (collected.length >= limit || reachedHandled) {
+        return this.#oldestFirst(collected.slice(0, limit), allowed);
       }
 
       const next = String(document?.data?.pagination?.next_cursor ?? '');
@@ -284,7 +309,9 @@ export class AgentMailTransport {
 
   /** Oldest-first, with each message's body and RFC id filled in. */
   async #oldestFirst(items, allowed) {
-    const ordered = items.slice().reverse();
+    // The caller already ordered these oldest-first; reversing here would undo
+    // the ordering the limit was applied to.
+    const ordered = items.slice();
     const loaded = [];
     for (const raw of ordered) {
       loaded.push(await this.#readMessage(raw, allowed));

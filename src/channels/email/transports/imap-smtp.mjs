@@ -10,7 +10,9 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import nodemailer from 'nodemailer';
 
-import { imapSecurity, normalizeAddress, smtpSecurity } from '../mail-format.mjs';
+import {
+  MAX_REPLY_CHARS, imapSecurity, normalizeAddress, smtpSecurity,
+} from '../mail-format.mjs';
 
 export class ImapSmtpTransport {
   #config;
@@ -72,7 +74,10 @@ export class ImapSmtpTransport {
   async listMessages({ afterUid = 0, limit = 25, allowSenders = null } = {}) {
     await this.connect();
     const mailbox = this.#config.mailbox ?? 'INBOX';
-    const allowed = allowSenders instanceof Set && allowSenders.size > 0 ? allowSenders : null;
+    // A Set — even an empty one — means the caller supplied a policy: an
+    // empty allowlist admits nobody, so no body is fetched at all. Treating
+    // it as "no filter" downloaded mail the policy had already refused.
+    const allowed = allowSenders instanceof Set ? allowSenders : null;
 
     // Step 1: read only the lightweight envelopes. ImapFlow cannot run a second
     // fetch while one is being iterated, so the accepted UIDs are collected

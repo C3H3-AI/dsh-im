@@ -72,7 +72,29 @@ function formatAddressList(value) {
  * went to other recipients looked like a private note. The subject and the
  * recipient lists are therefore prepended as a small header, and the original
  * body is left untouched below it.
+ *
+ * This form is for the model only. The shared layer parses `content` for
+ * control commands and approval decisions, so a decorated string there makes
+ * `/help` and "批准" unrecognisable — those read the plain body instead.
  */
+export function mailHeader({ subject, parsed }) {
+  const header = [];
+  const cleanSubject = String(subject ?? '').trim();
+  if (cleanSubject) header.push(`Subject: ${cleanSubject}`);
+
+  const from = formatAddressList(parsed?.from)[0];
+  if (from) header.push(`From: ${from}`);
+
+  const to = formatAddressList(parsed?.to);
+  if (to.length > 0) header.push(`To: ${to.join(', ')}`);
+
+  const cc = formatAddressList(parsed?.cc);
+  if (cc.length > 0) header.push(`Cc: ${cc.join(', ')}`);
+
+  return header.length > 0 ? `${header.join('\n')}\n\n` : '';
+}
+
+/** The mail metadata above the original body, as one prompt string. */
 export function mailPromptContent({ body, subject, parsed }) {
   const header = [];
   const cleanSubject = String(subject ?? '').trim();
@@ -98,21 +120,6 @@ export function mailPromptContent({ body, subject, parsed }) {
  * Turn one parsed mail into the shared bridge's inbound message shape, or null
  * when the mail must be ignored (self-sent, automated, empty body).
  */
-/**
- * The auto-approval predicate for a mailbox.
- *
- * Returns a function that admits a sender only when the mailbox opted in AND
- * that sender is on its allowlist — mail is forgeable, so the exemption never
- * extends past the list that already gates the mailbox.
- */
-export function allowlistApproval(config) {
-  const listed = new Set(
-    (config?.allowedSenders ?? []).map((entry) => String(entry).trim().toLowerCase()),
-  );
-  const enabled = config?.autoApprove === true;
-  return (senderId) => enabled && listed.has(String(senderId ?? '').trim().toLowerCase());
-}
-
 export function normalizeEmail(parsed, { address, state } = {}) {
   const messageId = parseMessageIds(parsed?.messageId)[0] ?? null;
   if (!messageId) return null;
@@ -153,7 +160,11 @@ export function normalizeEmail(parsed, { address, state } = {}) {
     // Email has no notion of a display name we can trust; the address is both.
     senderName: parsed?.from?.value?.[0]?.name || from,
     senderAlternateId: undefined,
+    // The model needs the subject and the recipient lists; the parser must not
+    // see them, or `/help` and "批准" stop being recognised. `content` carries
+    // the decorated form and `controlText` the plain body.
     content: mailPromptContent({ body, subject, parsed }),
+    controlText: body,
     plainText: typeof parsed?.text === 'string',
     images: [],
     files: attachments.map((attachment) => ({
@@ -416,12 +427,6 @@ export class EmailRuntime {
         logger: this.#logger,
         replyTimeoutMs: this.#replyTimeoutMs,
         signal: this.#abortController.signal,
-        // Opt-in per mailbox. When on, a sender who already passed the
-        // allowlist is trusted to have their request run without an extra
-        // confirming reply — which nobody sends for an automated message.
-        autoApproveFor: this.#config.autoApprove === true
-          ? allowlistApproval(this.#config)
-          : null,
       });
       this.#status.ready = true;
       this.#status.connectionState = 'connected';

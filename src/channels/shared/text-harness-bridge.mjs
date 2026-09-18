@@ -83,7 +83,7 @@ function canClaimInteractionReply(message, pending, senderId) {
     && (message.kind !== 'group' || message.addressed === true)
     && !hasInboundImages(message)
     && !hasInboundFiles(message)
-    && Boolean(cleanText(message.content));
+    && Boolean(controlTextOf(message));
 }
 
 function artifactFailureText(fileName, error, descriptor) {
@@ -138,6 +138,18 @@ export function createTextBridgeStatus() {
   };
 }
 
+/**
+ * The text a channel's control commands and approval decisions are parsed from.
+ *
+ * A channel may decorate `content` for the model — the email channel prepends
+ * the mail headers so a subject line reaches the model — while `controlText`
+ * keeps the undecorated body. Without this a decorated message made `/help`
+ * and "批准" unrecognisable.
+ */
+function controlTextOf(message) {
+  return cleanText(message?.controlText ?? message?.content);
+}
+
 export class TextHarnessBridge {
   #descriptor;
   #bot;
@@ -161,7 +173,6 @@ export class TextHarnessBridge {
   #approvals;
   #batches = new BatchInputManager();
   #interactionCard;
-  #autoApproveFor;
 
   constructor({
     descriptor,
@@ -176,9 +187,6 @@ export class TextHarnessBridge {
     signal,
     keepaliveIntervalMs = 4_000,
     interactionCard = null,
-    // Returns true when this sender's requests may run without a confirming
-    // reply. Mail is forgeable, so this stays opt-in and off by default.
-    autoApproveFor = null,
   }) {
     if (!descriptor?.key || !descriptor?.label) throw new TypeError('A channel descriptor is required');
     if (!bot || typeof bot.sendText !== 'function') throw new TypeError('A bot client is required');
@@ -195,7 +203,6 @@ export class TextHarnessBridge {
     this.#signal = signal;
     this.#keepaliveIntervalMs = keepaliveIntervalMs;
     this.#interactionCard = interactionCard ?? null;
-    this.#autoApproveFor = typeof autoApproveFor === 'function' ? autoApproveFor : null;
     this.#deferred = createDeferredDeliveryCoordinator({ harness, state, signal, logger,
       deliver: (entry, outcome) => this.#deliverDeferredOutcome(entry, outcome),
     });
@@ -207,16 +214,6 @@ export class TextHarnessBridge {
 
   get status() {
     return structuredClone(this.#status);
-  }
-
-  /** Whether this bridge runs an allowlisted sender's request without asking. */
-  get autoApproveEnabled() {
-    return typeof this.#autoApproveFor === 'function';
-  }
-
-  /** The auto-approval predicate, or a reject-all default when it is off. */
-  autoApproveFor(senderId) {
-    return this.#autoApproveFor?.(senderId) === true;
   }
 
   accept(message, { contextSnapshot, accessDecision } = {}) {
@@ -297,7 +294,7 @@ export class TextHarnessBridge {
 
     const key = `${normalized.kind}:${normalized.conversationId}`;
     const pending = this.#pendingInteractions.get(key);
-    const text = cleanText(normalized.content);
+    const text = controlTextOf(normalized);
     const batchCommand = isBatchInputCommand(text);
     if (batchCommand && normalized.kind === 'group' && normalized.addressed === true) {
       return this.#finishLocalMessage(
@@ -371,19 +368,6 @@ export class TextHarnessBridge {
         this.#commandTasks.delete(task);
       });
       this.#commandTasks.add(task);
-      return task;
-    }
-    // An auto-approving mailbox runs the request straight away. Nothing is
-    // waiting and no approval is outstanding, so the normal path would park the
-    // message behind a confirmation that no one is going to send.
-    if (!pending
-      && !this.#approvals.hasPending(key)
-      && this.#autoApproveFor?.(senderId) === true) {
-      let task;
-      task = this.#enqueueMessage(normalized, messageId, senderId, key).finally(() => {
-        this.#acceptedMessageIds.delete(messageId);
-      });
-      this.#acceptedMessageIds.set(messageId, task);
       return task;
     }
     const approval = this.#approvals.claimReply({
@@ -528,7 +512,7 @@ export class TextHarnessBridge {
     const target = message.replyTarget;
     try {
       const result = await runner(
-        cleanText(message.content),
+        controlTextOf(message),
         this.#harness,
         this.#state,
         key,
@@ -643,7 +627,7 @@ export class TextHarnessBridge {
     }
 
     const target = message.replyTarget;
-    const text = cleanText(message.content);
+    const text = controlTextOf(message);
     const batchSubmission = message.batchSubmission;
     let stream = null;
     let semanticStream = false;
@@ -1028,7 +1012,7 @@ export class TextHarnessBridge {
     }
 
     const target = message.replyTarget;
-    const text = cleanText(message.content);
+    const text = controlTextOf(message);
     if (!text || hasInboundImages(message) || hasInboundFiles(message)) {
       try {
         await this.#bot.sendText(target, t('请用文字回答当前问题。'));
