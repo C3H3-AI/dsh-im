@@ -556,7 +556,8 @@ function SessionBindingPanel({
  * add form uses is offered here.
  */
 function MailboxReauthorize({ address, disabled, rpcCall, endpoints, onDone }) {
-  const [done, setDone] = React.useState(false);
+  const [session, setSession] = React.useState(null);
+  const done = session !== null;
   const invoke = React.useCallback(async (endpoint, payload) => {
     const response = await rpcCall(endpoint, payload);
     if (response && typeof response === 'object' && 'ok' in response) {
@@ -589,7 +590,21 @@ function MailboxReauthorize({ address, disabled, rpcCall, endpoints, onDone }) {
         ? '已生成授权链接：在打开的页面里用微信扫码并确认，连接会自动恢复。'
         : '当前邮箱的授权已失效。重新扫码即可恢复，无需移除这个邮箱。'),
     done
-      ? h('p', { className: 'dim-emailHint' }, '等待扫码完成…')
+      ? h('div', { className: 'dim-emailAuthPanel' },
+        session.browserUrl
+          ? h('div', { className: 'dim-emailAuthRow' },
+            h('span', null, '授权链接'),
+            h('a', {
+              href: session.browserUrl, target: '_blank', rel: 'noreferrer',
+              className: 'dim-emailAuthLink',
+            }, session.browserUrl))
+          : h('p', { className: 'dim-emailHint' }, '未能获取授权链接，请重新生成。'),
+        session.inputCode
+          ? h('div', { className: 'dim-emailAuthRow' },
+            h('span', null, '配对码'),
+            h('code', null, session.inputCode))
+          : null,
+        h('p', { className: 'dim-emailHint' }, '等待扫码完成…'))
       : null,
     h('div', { className: 'ddt-actions dim-viewActions' },
       h('button', {
@@ -597,8 +612,11 @@ function MailboxReauthorize({ address, disabled, rpcCall, endpoints, onDone }) {
         onClick: async () => {
           // The address doubles as the CLI workspace, so the scan lands in the
           // same one this mailbox reads from.
-          await invoke(endpoints.startAuth, { transport: 'agent-mail', workspace: address });
-          setDone(true);
+          const started = await invoke(endpoints.startAuth, {
+            transport: 'agent-mail', workspace: address,
+          });
+          // The link is what the user scans or opens, so it must be shown.
+          setSession(started ?? {});
         },
       }, done ? '重新生成' : '重新扫码授权')));
 }

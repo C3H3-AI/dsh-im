@@ -2011,7 +2011,16 @@ test('a bound agent mailbox offers re-authorization', async () => {
           allowedSenders: ['a@x.com'], connected: false,
         },
         busy: false, error: null, onSave: async () => {}, onCancel() {},
-        rpcCall: async (endpoint, payload) => { called.push({ endpoint, payload }); return { ok: true, value: {} }; },
+        rpcCall: async (endpoint, payload) => {
+          called.push({ endpoint, payload });
+          if (endpoint === 'bot.auth.start') {
+            return { ok: true, value: {
+              browserUrl: 'https://agent.qq.com/page/oauth?oauth_type=device&user_code=uc_T',
+              inputCode: 'uc_T', expiresInMs: 600_000,
+            } };
+          }
+          return { ok: true, value: {} };
+        },
         endpoints: {
           startAuth: 'bot.auth.start', pollAuth: 'bot.auth.poll',
           listSessions: 'bot.session.list', getBinding: 'bot.session-binding.get',
@@ -2026,6 +2035,11 @@ test('a bound agent mailbox offers re-authorization', async () => {
   assert.ok(button, 'a bound Agent mailbox offers re-authorization');
 
   await TestRenderer.act(async () => { button.props.onClick(); });
+  // The link is the whole point of the control: the panel said it had one and
+  // showed nothing, so the user had nothing to scan.
+  const links = renderer.root.findAll((node) => node.type === 'a').map((a) => a.props.href);
+  assert.ok(links.some((href) => String(href ?? '').includes('agent.qq.com/page/oauth')),
+    'the authorization link is shown after it is generated');
   const start = called.find((c) => c.endpoint === 'bot.auth.start');
   assert.ok(start, 'the scan is started');
   assert.equal(start.payload.workspace, 'diyhome@agent.qq.com',
