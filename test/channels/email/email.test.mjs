@@ -1481,3 +1481,37 @@ test('a mailbox uses its own workspace when it has a login', async () => {
 
 
 
+
+test('an allowlisted sender may execute without a confirming reply', async () => {
+  // The intended behaviour: mail from an allowlisted address runs directly.
+  // Anyone else is refused, and the policy defaults to no execution at all.
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-policy-'));
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    let pushed = null;
+    const controller = new EmailController({
+      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: { 'imap-smtp': makeStubTransport, 'agent-mail': makeStubTransport },
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+      syncAccessPolicy: async (botId, policy) => { pushed = policy; },
+    });
+    await controller.bindMailbox({
+      address: 'a@agent.qq.com', transport: 'agent-mail',
+      allowedSenders: ['boss@corp.com'],
+    });
+
+    assert.ok(pushed, 'a policy is pushed to the Harness');
+    const direct = pushed.direct ?? pushed;
+    const users = direct.allowlist?.users ?? direct.users ?? [];
+    const boss = users.find((u) => u.id === 'boss@corp.com');
+    assert.ok(boss, 'the allowlisted sender is present in the policy');
+    assert.equal(boss.canExecuteCommands, true, 'and may execute commands');
+    assert.equal(direct.open?.defaultCanExecuteCommands, false,
+      'nobody outside the allowlist may execute');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});

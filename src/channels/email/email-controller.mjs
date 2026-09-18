@@ -230,6 +230,10 @@ export class EmailController {
         await this.#restoreCredential(identity.tokenRef, previousCredential);
         throw error;
       }
+      // The allowlist has to reach the Harness now, not only when the settings
+      // are edited later: without it a freshly bound mailbox admits nobody, so
+      // its first mail is refused for the wrong reason.
+      await this.#applyAllowlistToPolicy(identity.botId, config);
       await this.#stopRuntime(identity.botId);
       try {
         await this.#startRuntime(config, credential);
