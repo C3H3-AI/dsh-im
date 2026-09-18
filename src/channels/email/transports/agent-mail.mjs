@@ -128,6 +128,8 @@ export class AgentMailTransport {
   // Indirection so tests can drive the protocol without the real binary.
   #run = runCli;
   #workspace = '';
+  // undefined = not yet probed; '' = use the CLI default.
+  #workspaceResolved;
 
   /** Test seam: swap the CLI runner. Not part of the transport contract. */
   __setRunCliForTests(impl) {
@@ -135,14 +137,39 @@ export class AgentMailTransport {
   }
 
   /**
-   * Call the CLI in this mailbox's workspace.
+   * The workspace to call the CLI in.
    *
-   * The CLI separates accounts per workspace, so every call must carry it —
-   * otherwise two Agent mailboxes share one login and both read the first
-   * account.
+   * agently-cli separates accounts per workspace, so a mailbox normally reads
+   * from its own. That matters only when several workspaces have logins: with a
+   * single authorized account every mailbox belongs to it, and pinning each one
+   * to a workspace nobody logged into just reports "authorization required".
+   * The pinned workspace is therefore used when it has a login, and the CLI's
+   * default otherwise.
    */
-  #call(args, options = {}) {
-    return this.#run(args, { ...options, env: { ...cliEnv(this.#workspace), ...(options.env ?? {}) } });
+  async #workspaceFor() {
+    if (this.#workspaceResolved !== undefined) return this.#workspaceResolved;
+    let resolved = '';
+    if (this.#workspace) {
+      try {
+        const { document } = await this.#run(['auth', 'status'], { signal: this.#signal, env: cliEnv(this.#workspace) });
+        if (document?.data?.logged_in === true) resolved = this.#workspace;
+      } catch {
+        // No login there; fall through to the CLI default.
+      }
+    }
+    this.#workspaceResolved = resolved;
+    return resolved;
+  }
+
+  /** Invalidate the cached workspace, after an authorization for instance. */
+  __resetWorkspaceCache() {
+    this.#workspaceResolved = undefined;
+  }
+
+  /** Call the CLI in this mailbox's workspace, resolved once and cached. */
+  async #call(args, options = {}) {
+    const workspace = await this.#workspaceFor();
+    return this.#run(args, { ...options, env: { ...cliEnv(workspace), ...(options.env ?? {}) } });
   }
 
   constructor({ config, signal } = {}) {

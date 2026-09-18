@@ -1136,6 +1136,13 @@ function stubCli(queue) {
     calls,
     impl(args, options = {}) {
       calls.push({ args, input: options.input ?? null });
+      // The transport probes its own workspace once; answer without consuming
+      // the scripted responses, which describe the protocol under test.
+      if (args[0] === 'auth' && args[1] === 'status') {
+        return Promise.resolve({
+          document: { ok: true, data: { logged_in: false } }, stdout: '', stderr: '', exitCode: 0,
+        });
+      }
       const next = queue.shift();
       if (next === undefined) throw new Error(`unexpected CLI call: ${args.join(' ')}`);
       if (next instanceof Error) return Promise.reject(next);
@@ -1218,10 +1225,11 @@ test('a reply completes the CLI two-step confirmation', async () => {
     to: 'a@x.com', subject: 'Re: Hi', text: 'hello', transportMessageId: 'msg_5',
   });
   assert.equal(result.sent, true);
-  assert.equal(cli.calls.length, 2, 'the send is retried once with the token');
-  assert.ok(cli.calls[1].args.includes('--confirmation-token'));
-  assert.ok(cli.calls[1].args.includes('ct_1'));
-  assert.equal(cli.calls[0].input, 'hello', 'the body travels on stdin, not argv');
+  const sends = cli.calls.filter((c) => c.args.includes('+reply'));
+  assert.equal(sends.length, 2, 'the send is retried once with the token');
+  assert.ok(sends[1].args.includes('--confirmation-token'));
+  assert.ok(sends[1].args.includes('ct_1'));
+  assert.equal(sends[0].input, 'hello', 'the body travels on stdin, not argv');
 });
 
 test('a CLI failure surfaces its own message, not the exit code', async () => {
@@ -1389,4 +1397,57 @@ test('each agent mailbox authorizes in its own CLI workspace', async () => {
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
+});
+
+test('a mailbox falls back to the CLI default workspace', async () => {
+  // agently-cli separates accounts per workspace. With a single authorized
+  // account every mailbox belongs to it, so pinning each one to a workspace
+  // nobody logged into reported "authorization required" instead of working.
+  const { createAgentMailTransportForTests } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const seen = [];
+  const cli = (args, options = {}) => {
+    seen.push({ args, workspace: options.env?.AGENTLY_WORKSPACE ?? null });
+    if (args[0] === 'auth' && args[1] === 'status') {
+      // The mailbox's own workspace has no login.
+      return Promise.resolve({ document: { ok: true, data: { logged_in: false } }, stdout: '', stderr: '', exitCode: 0 });
+    }
+    return Promise.resolve({
+      document: { ok: true, data: { aliases: [{ alias_id: 'A1', email: 'real@agent.qq.com', is_primary: true }] } },
+      stdout: '', stderr: '', exitCode: 0,
+    });
+  };
+  const transport = createAgentMailTransportForTests({
+    config: { address: 'pinned@agent.qq.com' }, runCliImpl: cli,
+  });
+  await transport.connect();
+  assert.equal(transport.address, 'real@agent.qq.com');
+  const meCall = seen.find((c) => c.args[0] === '+me');
+  // No AGENTLY_WORKSPACE at all means the CLI uses its own default.
+  assert.ok(!meCall.workspace, 'the call falls back to the CLI default');
+});
+
+test('a mailbox uses its own workspace when it has a login', async () => {
+  // With two accounts authorized, each mailbox must read its own.
+  const { createAgentMailTransportForTests } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const seen = [];
+  const cli = (args, options = {}) => {
+    seen.push({ args, workspace: options.env?.AGENTLY_WORKSPACE ?? null });
+    if (args[0] === 'auth' && args[1] === 'status') {
+      return Promise.resolve({ document: { ok: true, data: { logged_in: true } }, stdout: '', stderr: '', exitCode: 0 });
+    }
+    return Promise.resolve({
+      document: { ok: true, data: { aliases: [{ alias_id: 'A2', email: 'pinned@agent.qq.com', is_primary: true }] } },
+      stdout: '', stderr: '', exitCode: 0,
+    });
+  };
+  const transport = createAgentMailTransportForTests({
+    config: { address: 'pinned@agent.qq.com' }, runCliImpl: cli,
+  });
+  await transport.connect();
+  const meCall = seen.find((c) => c.args[0] === '+me');
+  assert.equal(meCall.workspace, 'pinned@agent.qq.com', 'its own workspace wins when it has a login');
 });
