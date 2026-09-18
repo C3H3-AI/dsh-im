@@ -161,6 +161,23 @@ export class AgentMailTransport {
     return resolved;
   }
 
+  /**
+   * The mailbox this transport is actually talking to.
+   *
+   * A fallback to the CLI default is only safe when that login owns this
+   * address. Reusing another mailbox's login would silently send this
+   * mailbox's replies from the wrong sender, which the recipient sees as a
+   * stranger answering them.
+   */
+  async #assertIdentity(address) {
+    const wanted = normalizeAddress(this.#config.platformId);
+    if (!wanted || address === wanted) return;
+    throw new AgentMailCliError(
+      `agently-cli is logged in as ${address}, not ${wanted}; authorize this mailbox separately`,
+      { code: 'identity-mismatch' },
+    );
+  }
+
   /** Invalidate the cached workspace, after an authorization for instance. */
   __resetWorkspaceCache() {
     this.#workspaceResolved = undefined;
@@ -211,6 +228,7 @@ export class AgentMailTransport {
         code: 'identity-missing',
       });
     }
+    await this.#assertIdentity(address);
     this.#address = address;
     this.#connected = true;
   }

@@ -628,13 +628,16 @@ function MailboxSettings({ account, busy, error, onSave, onCancel, rpcCall, endp
   const [allowedSenders, setAllowedSenders] = React.useState(
     (account?.allowedSenders ?? []).join('\n'),
   );
+  // Whether an allowlisted sender is trusted enough to skip the confirming
+  // reply. Off unless the mailbox was saved with it on.
+  const [autoApprove, setAutoApprove] = React.useState(account?.autoApprove === true);
   // The binding panel owns the sender rows; saving the allowlist must reload
   // that panel, because the parent's own reload only re-reads channel state.
   const bindingReload = React.useRef(null);
   const saveAllowlist = async () => {
     const senders = allowedSenders
       .split(/[\s,;，；]+/).map((value) => value.trim()).filter(Boolean);
-    await onSave?.({ allowedSenders: senders });
+    await onSave?.({ allowedSenders: senders, autoApprove });
     await onChanged?.({ silent: true });
     await bindingReload.current?.();
   };
@@ -654,7 +657,11 @@ function MailboxSettings({ account, busy, error, onSave, onCancel, rpcCall, endp
       field('允许的发件人', h('textarea', {
         value: allowedSenders, disabled: busy,
         onChange: (event) => setAllowedSenders(event.target.value),
-      }), '保存后会重新连接邮箱以使设置立即生效。')),
+      }), '保存后会重新连接邮箱以使设置立即生效。'),
+      field('自动批准', h('input', {
+        type: 'checkbox', checked: autoApprove, disabled: busy,
+        onChange: (event) => setAutoApprove(event.target.checked),
+      }), '开启后，白名单内发件人的请求直接执行，不再回信确认；关闭时每封来信需要回复确认。')),
     error ? h('p', { className: 'dim-inlineError', role: 'alert' }, error.message ?? String(error)) : null,
     h('div', { className: 'ddt-actions dim-viewActions' },
       h('button', { type: 'button', className: 'ddt-button', onClick: onCancel, disabled: busy }, '取消'),

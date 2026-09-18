@@ -261,11 +261,11 @@ export class EmailController {
       if (update.allowedSenders !== undefined) {
         next.allowedSenders = normalizeEmailAccessPolicy({ allowedSenders: update.allowedSenders }).allowedSenders;
       }
-      if (next.allowedSenders.length === 0) throw new TypeError(t('必须至少配置一个允许发件人'));
+      if (update.autoApprove !== undefined) next.autoApprove = update.autoApprove === true;
       const allowlistChanged = update.allowedSenders !== undefined;
       const saved = await this.#configStore.save(next);
       if (allowlistChanged) await this.#applyAllowlistToPolicy(botId, saved);
-      // Host and allowlist changes take effect immediately.
+      // Host, allowlist and approval changes take effect immediately.
       await this.#stopRuntime(botId);
       const secrets = await this.#resolveSecrets(saved);
       if (secrets) {

@@ -98,6 +98,21 @@ export function mailPromptContent({ body, subject, parsed }) {
  * Turn one parsed mail into the shared bridge's inbound message shape, or null
  * when the mail must be ignored (self-sent, automated, empty body).
  */
+/**
+ * The auto-approval predicate for a mailbox.
+ *
+ * Returns a function that admits a sender only when the mailbox opted in AND
+ * that sender is on its allowlist — mail is forgeable, so the exemption never
+ * extends past the list that already gates the mailbox.
+ */
+export function allowlistApproval(config) {
+  const listed = new Set(
+    (config?.allowedSenders ?? []).map((entry) => String(entry).trim().toLowerCase()),
+  );
+  const enabled = config?.autoApprove === true;
+  return (senderId) => enabled && listed.has(String(senderId ?? '').trim().toLowerCase());
+}
+
 export function normalizeEmail(parsed, { address, state } = {}) {
   const messageId = parseMessageIds(parsed?.messageId)[0] ?? null;
   if (!messageId) return null;
@@ -401,6 +416,12 @@ export class EmailRuntime {
         logger: this.#logger,
         replyTimeoutMs: this.#replyTimeoutMs,
         signal: this.#abortController.signal,
+        // Opt-in per mailbox. When on, a sender who already passed the
+        // allowlist is trusted to have their request run without an extra
+        // confirming reply — which nobody sends for an automated message.
+        autoApproveFor: this.#config.autoApprove === true
+          ? allowlistApproval(this.#config)
+          : null,
       });
       this.#status.ready = true;
       this.#status.connectionState = 'connected';
