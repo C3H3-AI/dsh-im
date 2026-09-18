@@ -1507,3 +1507,28 @@ test('an auto-approving mailbox only trusts its own allowlist', async () => {
   assert.equal(allowlistApproval({ autoApprove: false, allowedSenders: ['a@b.com'] })('a@b.com'), false,
     'a mailbox without the setting never auto-approves');
 });
+
+test('the mailbox status reports the saved approval choice', async () => {
+  // The settings checkbox reads it from the snapshot; when the field was
+  // missing the form opened unchecked and disagreed with the Host.
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-auto4-'));
+  try {
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    const controller = new EmailController({
+      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: { 'imap-smtp': makeStubTransport, 'agent-mail': makeStubTransport },
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+    });
+    const status = await controller.bindMailbox({
+      address: 'a@agent.qq.com', transport: 'agent-mail',
+      allowedSenders: ['x@y.com'], autoApprove: true,
+    });
+    const bot = status.bots.find((b) => b.platformId.includes('agent'));
+    assert.equal(bot.autoApprove, true, 'the saved choice is reported');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});

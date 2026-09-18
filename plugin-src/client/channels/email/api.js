@@ -23,6 +23,9 @@ function normalizeEmailBotExtension(value) {
   const senders = Array.isArray(value?.allowedSenders) ? value.allowedSenders : [];
   return {
     allowedSenders: senders.filter((entry) => typeof entry === 'string' && entry),
+    // The saved approval choice; without it the settings checkbox opened
+    // unchecked every time and silently disagreed with the Host.
+    autoApprove: value?.autoApprove === true,
     // Without this the settings page cannot tell an Agent mailbox from an
     // IMAP/SMTP one, and shows server hosts that do not apply.
     ...(typeof value?.transport === 'string' && value.transport

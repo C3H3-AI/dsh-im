@@ -155,7 +155,7 @@ export class EmailController {
    * producing a bot that never receives mail. */
   async bindMailbox({
     address, password, accessToken, refreshToken, provider, transport,
-    imapHost, imapPort, smtpHost, smtpPort, allowedSenders,
+    imapHost, imapPort, smtpHost, smtpPort, allowedSenders, autoApprove,
   } = {}) {
     if (this.#closed) throw new Error(`${EMAIL_DESCRIPTOR.label} controller is closed`);
     const normalizedAddress = normalizeEmailAddress(address);
@@ -186,6 +186,8 @@ export class EmailController {
         smtpPort: smtpPort ?? preset?.smtpPort ?? 465,
       } : {}),
       allowedSenders: normalizeEmailAccessPolicy({ allowedSenders }).allowedSenders,
+      // Chosen at bind time too, so a mailbox can be created ready to run.
+      autoApprove: autoApprove === true,
     };
     if (needsHosts && (!security.imapHost || !security.smtpHost)) {
       throw new TypeError(t('请选择邮箱服务商或填写 IMAP/SMTP 服务器地址'));
@@ -362,6 +364,9 @@ export class EmailController {
         smtpHost: config.smtpHost,
         smtpPort: config.smtpPort,
         allowedSenders: config.allowedSenders ?? [],
+        // The settings form shows the saved choice; without it the checkbox
+        // silently reset to off every time the panel opened.
+        autoApprove: config.autoApprove === true,
         createdAt: config.createdAt,
         connectedAt: config.connectedAt,
         connected,
