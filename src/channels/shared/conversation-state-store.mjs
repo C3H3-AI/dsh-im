@@ -97,6 +97,23 @@ export class ConversationStateStore {
     await this.#persist();
   }
 
+  /**
+   * Take back a `markSeen` whose delivery never happened.
+   *
+   * `markSeen` means "this message was handled". A turn that failed before
+   * producing anything is not handled, so keeping the mark makes the id a
+   * permanent tombstone: every later poll short-circuits on `hasSeen` and the
+   * mail is never retried. The bridge calls this to separate "attempted" from
+   * "done". A message that already succeeded is never unmarked.
+   */
+  async unmarkSeen(messageId) {
+    const index = this.#state.seenMessageIds.indexOf(messageId);
+    if (index === -1) return false;
+    this.#state.seenMessageIds.splice(index, 1);
+    await this.#persist();
+    return true;
+  }
+
   cursor() {
     return this.#state.cursor;
   }

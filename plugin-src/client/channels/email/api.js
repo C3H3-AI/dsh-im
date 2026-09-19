@@ -3,6 +3,10 @@ import { TOKEN_BOT_ENDPOINTS, createTokenChannelApi } from '../shared/token-api.
 export const EMAIL_RPC_CHANNEL = '/email';
 export const EMAIL_ENDPOINTS = Object.freeze({
   ...TOKEN_BOT_ENDPOINTS,
+  // Asks the Host whether the channel is open. Email ships closed, and a closed
+  // channel hides its access entry point rather than offering a form the Host
+  // would refuse.
+  availability: 'channel.availability',
   // The mailbox binds by address + app password rather than a single token.
   bindCredentials: 'bot.bind-mailbox',
   updateMailbox: 'bot.mailbox.update',

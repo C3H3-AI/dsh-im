@@ -320,6 +320,9 @@ export class EmailRuntime {
   // Turns started by the poll loop, kept so `stop()` can wait for them and so
   // a failure is reported instead of surfacing as an unhandled rejection.
   #deliveries = new Set();
+  // Message keys handed to the bridge but not yet finished, so a re-listing
+  // during processing cannot deliver the same message twice.
+  #inFlight = new Set();
   #api;
   #bridge;
   #abortController;
@@ -483,7 +486,7 @@ export class EmailRuntime {
     this.#polling = null;
     // Deliveries are no longer awaited by the poll loop, so shutdown waits for
     // them here instead of dropping a turn mid-flight.
-    await this.whenIdle();
+    await this.whenIdle({ timeoutMs: 1_000 });
     const api = this.#api;
     this.#api = null;
     this.#bridge = null;
@@ -517,11 +520,65 @@ export class EmailRuntime {
     this.#deliveries.add(task);
   }
 
-  /** Wait for the deliveries started by the poll loop. */
-  async whenIdle() {
-    while (this.#deliveries.size > 0) {
-      await Promise.allSettled([...this.#deliveries]);
+  /**
+   * Hand one message to the bridge, exactly once.
+   *
+   * The poll loop can re-list a message before the bridge has recorded it: the
+   * bridge writes its "already handled" entry only once processing starts, and
+   * the loop no longer waits for that. This set is the loop's own guard against
+   * handing the same message over twice — the bridge remains the authority on
+   * what has actually been processed.
+   *
+   * Marking the message seen here instead (as the loop used to) ran *ahead* of
+   * the bridge's queue: by the time `#process` started, `hasSeen` was already
+   * true and the message was dropped silently.
+   */
+  #deliver(message, seenKey) {
+    const key = seenKey ?? message?.messageId;
+    const tracked = key !== undefined && key !== null && key !== '';
+    if (tracked) {
+      if (this.#inFlight.has(key)) return Promise.resolve();
+      this.#inFlight.add(key);
     }
+    return Promise.resolve(this.#bridge.accept(message)).finally(() => {
+      if (tracked) this.#inFlight.delete(key);
+    });
+  }
+
+  /** The bridge in use, so a caller can observe or steer delivery. */
+  get bridge() {
+    return this.#bridge;
+  }
+
+  /**
+   * Wait for the deliveries started by the poll loop.
+   *
+   * Bounded: a delivery whose Harness turn is parked on an approval never
+   * settles, and shutdown must not hang on it. The abort signal is raised
+   * before this is called, so a parked turn is already being torn down.
+   */
+  async whenIdle({ timeoutMs = 5_000 } = {}) {
+    const deadline = Date.now() + timeoutMs;
+    while (this.#deliveries.size > 0 && Date.now() < deadline) {
+      const remaining = Math.max(1, deadline - Date.now());
+      const settled = await Promise.race([
+        Promise.allSettled([...this.#deliveries]).then(() => true),
+        new Promise((resolve) => { setTimeout(() => resolve(false), remaining).unref?.(); }),
+      ]);
+      if (!settled) break;
+    }
+    // The bound is a deliberate trade-off: a turn parked on an approval never
+    // settles, and unload must not hang on it. Work that outlives the bound is
+    // ABANDONED — `stop()` nulls the api right after this returns, so such a
+    // turn can no longer reply. Report it rather than dropping it silently.
+    const abandoned = this.#deliveries.size;
+    if (abandoned > 0) {
+      this.#logger.warn?.(
+        `[dsh-im:email] shutdown abandoned ${abandoned} in-flight delivery(ies); `
+        + 'their replies will not be sent',
+      );
+    }
+    return abandoned;
   }
 
   /** A short, log-safe description of a delivery failure. */
@@ -568,11 +625,18 @@ export class EmailRuntime {
           // or an answer blocks the poll loop — so later mail stayed unread
           // until someone replied. The bridge already serialises per
           // conversation, so ordering is preserved without waiting here.
-          this.#track(this.#bridge.accept(message));
-        }
-        if (seenKey) await this.#state.markSeen(seenKey);
-        if (uid !== undefined && uid !== null && uid !== '' && uid !== cursor) {
-          await this.#state.setCursor(uid);
+          //
+          // The bridge owns the "already handled" record, and it only writes it
+          // once the message is actually being processed. The poll loop must not
+          // mark the message seen as well: doing it here runs *ahead* of the
+          // bridge's queue, so by the time `#process` starts, `hasSeen` is
+          // already true and the message is dropped silently. The loop therefore
+          // only rotates the in-flight set — it is the ordering guard that stops
+          // a re-listing from handing the same message to the bridge twice.
+          this.#track(this.#deliver(message, seenKey));
+          if (uid !== undefined && uid !== null && uid !== '' && uid !== cursor) {
+            await this.#state.setCursor(uid);
+          }
         }
       }
       this.#status.lastCheckedAt = Date.now();

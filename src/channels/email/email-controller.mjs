@@ -66,6 +66,7 @@ export class EmailController {
   #transports;
   #pendingAuth = null;
   #syncAccessPolicy;
+  #ensureWorkspace;
   #stateFor;
   #listWorkspaceSessions;
   #botWorkspaceFor;
@@ -94,6 +95,10 @@ export class EmailController {
     // two separate stores, so a changed allowlist must be pushed into the
     // policy or the channel keeps rejecting the new senders.
     syncAccessPolicy = null,
+    // Host-owned hook: create the bot's workspace record if it does not exist
+    // yet. The access policy lives *inside* that record, so a freshly bound
+    // mailbox has nowhere to push its allowlist until this has run.
+    ensureWorkspace = null,
     // Optional: supplied when the channel supports pinning a chat to an
     // existing session (the settings page session picker).
     stateFor = null,
@@ -118,6 +123,7 @@ export class EmailController {
     }
     this.#transports = transports;
     this.#syncAccessPolicy = typeof syncAccessPolicy === 'function' ? syncAccessPolicy : null;
+    this.#ensureWorkspace = typeof ensureWorkspace === 'function' ? ensureWorkspace : null;
     this.#stateFor = typeof stateFor === 'function' ? stateFor : null;
     this.#listWorkspaceSessions = typeof listWorkspaceSessions === 'function'
       ? listWorkspaceSessions : null;
@@ -230,16 +236,34 @@ export class EmailController {
         await this.#restoreCredential(identity.tokenRef, previousCredential);
         throw error;
       }
-      // The allowlist has to reach the Harness now, not only when the settings
-      // are edited later: without it a freshly bound mailbox admits nobody, so
-      // its first mail is refused for the wrong reason.
-      await this.#applyAllowlistToPolicy(identity.botId, config);
-      await this.#stopRuntime(identity.botId);
+      // From here the mailbox is on disk, so every later failure must either
+      // undo that write or leave state a retry can recover from. A mailbox saved
+      // but neither reachable nor authorized is exactly the broken state this
+      // guards against.
       try {
-        await this.#startRuntime(config, credential);
-        this.#errors.delete(identity.botId);
+        // The access policy lives *inside* the bot's workspace record, so that
+        // record has to exist before the allowlist can be pushed into it. The
+        // runtime used to be the only thing that created it — and the runtime
+        // starts after this — so on a brand-new mailbox the push failed with
+        // "workspace-bot-not-found", leaving the config on disk with no runtime
+        // and no policy.
+        await this.#ensureBotWorkspace(identity.botId, config);
+        // The allowlist has to reach the Harness now, not only when the settings
+        // are edited later: without it a freshly bound mailbox admits nobody, so
+        // its first mail is refused for the wrong reason.
+        await this.#applyAllowlistToPolicy(identity.botId, config);
+        await this.#stopRuntime(identity.botId);
+        try {
+          await this.#startRuntime(config, credential);
+          this.#errors.delete(identity.botId);
+        } catch (error) {
+          this.#errors.set(identity.botId, this.#safeError('connection-failed', error));
+        }
       } catch (error) {
-        this.#errors.set(identity.botId, this.#safeError('connection-failed', error));
+        // Roll the mailbox back instead of persisting a half-bound one, so the
+        // user sees a clean failure and a plain retry works.
+        await this.#rollbackBind(config, previousConfig, previousCredential);
+        throw error;
       }
       this.#touch();
     });
@@ -499,6 +523,50 @@ export class EmailController {
       allowlist: { users: senders.map((id) => ({ id, canExecuteCommands: true })) },
     });
     return createAccessPolicy({ direct: scope, group: scope });
+  }
+
+  /**
+   * Make sure the bot's workspace record exists before anything is written to
+   * it. The access policy is stored inside that record, so on a brand-new
+   * mailbox `#applyAllowlistToPolicy` has no bot to address yet and the store
+   * refuses it with "workspace-bot-not-found". Ordering the policy push after
+   * the runtime would fix that too, but it would also make the runtime — and
+   * the whole transport handshake behind it — a precondition for a purely
+   * local write, and would leave a mailbox briefly bound with no policy.
+   *
+   * Hosts without the hook (and the unit tests) skip this: their syncAccessPolicy
+   * has its own storage and never needed the record.
+   */
+  async #ensureBotWorkspace(botId, config) {
+    if (!this.#ensureWorkspace) return;
+    try {
+      await this.#ensureWorkspace(botId, config);
+    } catch (error) {
+      this.#logger.warn?.('[dsh-im:email] failed to prepare the bot workspace:', error);
+      throw new Error(t('邮箱访问策略同步失败，请重试'));
+    }
+  }
+
+  /**
+   * Undo a bind that failed after its config was written. Restoring the
+   * credential first, then the config, keeps the pair consistent: a config
+   * pointing at a token ref that no longer holds a secret is the one state the
+   * channel cannot recover from on its own.
+   *
+   * A brand-new mailbox is removed outright; a re-bind of an existing one is
+   * restored to the config it had, so the user's previous working mailbox
+   * survives a failed re-bind.
+   */
+  async #rollbackBind(config, previousConfig, previousCredential) {
+    await this.#restoreCredential(config.tokenRef, previousCredential);
+    try {
+      if (previousConfig) await this.#configStore.save(previousConfig);
+      else await this.#configStore.remove(config.botId);
+    } catch (error) {
+      // The bind failure is the error the user needs to see; a rollback that
+      // could not complete is reported alongside it rather than replacing it.
+      this.#logger.warn?.('[dsh-im:email] failed to roll back the mailbox config:', error);
+    }
   }
 
   /** Push the mailbox allowlist into the Harness access policy. */

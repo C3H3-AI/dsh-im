@@ -1562,6 +1562,202 @@ test('a turn waiting on approval does not stop later mail being read', async () 
   }
 });
 
+/**
+ * A paged Agent mailbox: `message +list` returns at most `pageSize` summaries,
+ * newest first, exactly as the provider does. Following `next_cursor` walks
+ * towards older mail. Reads are counted per id so a test can prove a handled
+ * message is never downloaded twice.
+ */
+function pagedAgentMailbox({ total = 30, pageSize = 25, newest = 30, prefix = 'msg_' } = {}) {
+  // Ids ascend with age: msg_30 is the newest, msg_1 the oldest.
+  const oldest = newest - total + 1;
+  const ordered = [];
+  for (let n = newest; n >= oldest; n -= 1) {
+    ordered.push({
+      message_id: `${prefix}${n}`,
+      subject: `Subject ${n}`,
+      snippet: `snippet ${n}`,
+      from: { email: 'a@x.com' },
+    });
+  }
+  const list = [];
+  const reads = [];
+  let cursorRequests = 0;
+  const impl = (args) => {
+    const reply = (data) => Promise.resolve({
+      document: { ok: true, data }, stdout: '', stderr: '', exitCode: 0,
+    });
+    if (args[0] === 'auth' && args[1] === 'status') {
+      return reply({ logged_in: false });
+    }
+    if (args[0] === 'message' && args[1] === '+list') {
+      const at = args.indexOf('--cursor');
+      const cursor = at >= 0 ? args[at + 1] : '';
+      cursorRequests += 1;
+      // Cursors are the id to resume after, so `--cursor msg_25` yields the
+      // entries strictly older than it.
+      const start = cursor ? ordered.findIndex((m) => m.message_id === cursor) + 1 : 0;
+      const slice = ordered.slice(start, start + pageSize);
+      const hasMore = start + pageSize < ordered.length;
+      list.push({ cursor, ids: slice.map((m) => m.message_id) });
+      return reply({
+        data: slice,
+        pagination: hasMore ? { has_more: true, next_cursor: slice[slice.length - 1].message_id } : { has_more: false },
+      });
+    }
+    if (args[0] === 'message' && args[1] === '+read') {
+      const id = args[args.indexOf('--id') + 1];
+      reads.push(id);
+      const n = id.replace(prefix, '');
+      return reply({
+        message_id: id, rfc_message_id: `<rfc-${n}@x>`, body: `body ${n}`,
+        from: { email: 'a@x.com' }, subject: `Subject ${n}`,
+      });
+    }
+    throw new Error(`unexpected CLI call: ${args.join(' ')}`);
+  };
+  return {
+    impl,
+    reads,
+    list,
+    cursorRequests: () => cursorRequests,
+    // The mailbox's ids in delivery order (oldest first), which is the order
+    // every assertion compares against.
+    ids: ordered.map((m) => m.message_id).reverse(),
+  };
+}
+
+test('a backlog larger than one page is delivered oldest-first across the page boundary', async () => {
+  // The provider returns at most 25 summaries per page, newest first, and the
+  // transport used to reverse only that one page. With 30 messages pending, the
+  // five oldest lived on the next page and were never fetched, while the cursor
+  // jumped past them.
+  const { createAgentMailTransportForTests } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const mailbox = pagedAgentMailbox({ total: 30, pageSize: 25, newest: 30 });
+  const transport = createAgentMailTransportForTests({
+    config: { address: 'bot@agent.qq.com' }, runCliImpl: mailbox.impl,
+  });
+
+  const first = await transport.listMessages({ afterUid: null, limit: 25 });
+  assert.deepEqual(
+    first.map((m) => m.uid),
+    mailbox.ids.slice(0, 25),
+    'the first poll returns the 25 OLDEST messages, not the 25 newest',
+  );
+  assert.equal(first[0].uid, 'msg_1', 'the oldest backlog message is delivered first');
+  assert.ok(mailbox.list.length >= 2, `the walk paged past the first page (${mailbox.list.length} page(s))`);
+  assert.ok(
+    mailbox.list.some((page) => page.ids.includes('msg_1')),
+    'a page listing msg_1 was fetched, so the oldest backlog was actually reached',
+  );
+});
+
+test('the second poll continues from the cursor without re-downloading handled mail', async () => {
+  // After the first batch, only the five messages newer than the cursor remain.
+  // Re-reversing a single page returned msg_6..msg_29 again, burning the
+  // provider's tight rate limit on bodies already delivered.
+  const { createAgentMailTransportForTests } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const mailbox = pagedAgentMailbox({ total: 30, pageSize: 25, newest: 30 });
+  const transport = createAgentMailTransportForTests({
+    config: { address: 'bot@agent.qq.com' }, runCliImpl: mailbox.impl,
+  });
+
+  const first = await transport.listMessages({ afterUid: null, limit: 25 });
+  const cursorAfterFirst = first[first.length - 1].uid;
+  assert.equal(cursorAfterFirst, 'msg_25', 'the cursor follows the returned batch');
+
+  const readsAfterFirst = mailbox.reads.length;
+  const second = await transport.listMessages({ afterUid: cursorAfterFirst, limit: 25 });
+  assert.deepEqual(second.map((m) => m.uid), ['msg_26', 'msg_27', 'msg_28', 'msg_29', 'msg_30'],
+    'the second poll returns only the mail newer than the cursor, oldest first');
+
+  const rereads = mailbox.reads.slice(readsAfterFirst).filter((id) => first.some((m) => m.uid === id));
+  assert.deepEqual(rereads, [], 'no already-delivered message is read again');
+
+  // Third poll: nothing left, so no body is fetched at all.
+  const readsBeforeThird = mailbox.reads.length;
+  const third = await transport.listMessages({ afterUid: 'msg_30', limit: 25 });
+  assert.deepEqual(third, [], 'a drained mailbox returns nothing');
+  assert.equal(mailbox.reads.length, readsBeforeThird, 'a drained mailbox reads no bodies');
+});
+
+test('a body is read only for mail the poll actually returns', async () => {
+  // Every `message +read` costs rate-limit budget, so a handled message must be
+  // filtered by id before its body is fetched.
+  const { createAgentMailTransportForTests } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const mailbox = pagedAgentMailbox({ total: 30, pageSize: 25, newest: 30 });
+  const transport = createAgentMailTransportForTests({
+    config: { address: 'bot@agent.qq.com' }, runCliImpl: mailbox.impl,
+  });
+
+  const result = await transport.listMessages({ afterUid: 'msg_25', limit: 25 });
+  assert.deepEqual(result.map((m) => m.uid), ['msg_26', 'msg_27', 'msg_28', 'msg_29', 'msg_30']);
+  assert.equal(new Set(mailbox.reads).size, mailbox.reads.length, 'no message is read twice in one poll');
+  assert.deepEqual(
+    mailbox.reads.slice().sort(),
+    ['msg_26', 'msg_27', 'msg_28', 'msg_29', 'msg_30'],
+    'exactly the returned batch is read',
+  );
+});
+
+test('an empty allowlist admits nobody across page boundaries', async () => {
+  // An empty Set is a policy that refuses everyone; treating it as "no filter"
+  // downloaded bodies the policy had already rejected.
+  const { createAgentMailTransportForTests } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const mailbox = pagedAgentMailbox({ total: 30, pageSize: 25, newest: 30 });
+  const transport = createAgentMailTransportForTests({
+    config: { address: 'bot@agent.qq.com' }, runCliImpl: mailbox.impl,
+  });
+
+  const result = await transport.listMessages({ afterUid: null, limit: 25, allowSenders: new Set() });
+  assert.deepEqual(result, [], 'nobody is admitted');
+  assert.deepEqual(mailbox.reads, [], 'no body is downloaded for a refused sender');
+});
+
+test('a backlog deeper than one walk still drains completely, in order and without repeats', async () => {
+  // Polling repeatedly must deliver every message exactly once, oldest first.
+  // A walk that stops short of the oldest mail strands whatever sits below the
+  // deepest page: committing the cursor to a batch taken from the top leaves the
+  // rest permanently unreachable, and taking it from the bottom repeats mail.
+  const { createAgentMailTransportForTests } = await import(
+    '../../../src/channels/email/transports/agent-mail.mjs'
+  );
+  const total = 200;
+  const mailbox = pagedAgentMailbox({ total, pageSize: 25, newest: total });
+  const transport = createAgentMailTransportForTests({
+    config: { address: 'bot@agent.qq.com' }, runCliImpl: mailbox.impl,
+  });
+
+  const delivered = [];
+  let cursor = null;
+  for (let poll = 0; poll < 20; poll += 1) {
+    const batch = await transport.listMessages({ afterUid: cursor, limit: 25 });
+    if (batch.length === 0) break;
+    delivered.push(...batch.map((m) => m.uid));
+    cursor = batch[batch.length - 1].uid;
+  }
+
+  assert.deepEqual(
+    delivered,
+    mailbox.ids,
+    'every message is delivered exactly once, oldest first, with no gap and no repeat',
+  );
+  assert.equal(
+    mailbox.reads.length,
+    new Set(mailbox.reads).size,
+    'no body is downloaded more than once across the whole drain',
+  );
+  assert.equal(mailbox.reads.length, total, 'each message costs exactly one read');
+});
+
 test('an agent attachment carries the fields the runtime reads', async () => {
   // The API names differ from the runtime's: an inbound attachment used to
   // arrive with no name, no size and no type because the wrong keys were set.
@@ -1714,4 +1910,447 @@ test('the polling interval follows the provider-declared limits', async () => {
   assert.ok(tight > loose, `expected ${tight} > ${loose}`);
   assert.ok(tight >= 20_000, 'the floor keeps a small budget sane');
   assert.equal(pollIntervalForLimits(null), null, 'unknown limits fall back to the default');
+});
+
+// ---------------------------------------------------------------------------
+// Delivery exactly once — the poll loop and the bridge must not both dedupe
+// ---------------------------------------------------------------------------
+
+/** One inbound mail in the shape `normalizeEmail` consumes. */
+function inboundMail(n, overrides = {}) {
+  return {
+    uid: `msg_${n}`,
+    messageId: `<rfc-${n}@x>`,
+    from: { value: [{ address: 'a@x.com' }] },
+    to: { value: [{ address: 'b@y.com' }] },
+    cc: { value: [] },
+    subject: `S${n}`,
+    text: `body ${n}`,
+    attachments: [],
+    ...overrides,
+  };
+}
+
+/**
+ * Build a runtime over a stub transport and a stub Harness.
+ *
+ * The Harness counts `ask` calls, so "the mail was really executed" is an
+ * assertion on the Harness rather than on a side effect of polling. `bridge`
+ * is exposed by the runtime itself (see `get bridge`).
+ */
+async function startDeliveryRuntime(t, {
+  mailbox, harnessOverrides = {}, onHarnessAsk = null, ...runtimeOptions
+} = {}) {
+  const { EmailRuntime } = await import('../../../src/channels/email/email-runtime.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-deliver-'));
+  const state = await new EmailStateStore(join(dir, 'state.json')).load();
+  const asks = [];
+  // The bridge resolves a workspace session before asking, so the stub needs the
+  // session lifecycle methods too — without `createSession` the turn fails with
+  // "harness.createSession is not a function" before it ever reaches `ask`.
+  const harness = {
+    ensureRunning: async () => {},
+    sessionExists: async (sessionId) => Boolean(sessionId),
+    createSession: async () => 'email-session-1',
+    // `ask` is called positionally as (sessionId, text, options) — the same
+    // shape the other channel bridges use.
+    ask: async (sessionId, text, options = {}) => {
+      const call = { sessionId, text, ...options };
+      asks.push(call);
+      await onHarnessAsk?.(call);
+      return { answer: 'done', artifacts: [] };
+    },
+    ...harnessOverrides,
+  };
+  const runtime = new EmailRuntime({
+    config: { platformId: 'b@y.com', transport: 'agent-mail', allowedSenders: ['a@x.com'] },
+    harness,
+    state,
+    logger: { warn() {}, info() {}, error() {}, log() {} },
+    pollIntervalMs: 5,
+    createApi: () => ({
+      connect: async () => {}, disconnect: async () => {}, latestUid: async () => 'msg_0',
+      listMessages: mailbox,
+      sendReply: async () => {}, sendText: async () => {},
+    }),
+    ...runtimeOptions,
+  });
+  t.after(async () => {
+    await runtime.stop().catch(() => {});
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  });
+  return { runtime, asks, state, dir };
+}
+
+/** Wait until `predicate` holds, or fail with `describe()`. */
+async function waitFor(predicate, describe, { tries = 200, stepMs = 10 } = {}) {
+  for (let i = 0; i < tries; i += 1) {
+    if (await predicate()) return;
+    await new Promise((resolve) => { setTimeout(resolve, stepMs); });
+  }
+  assert.fail(describe());
+}
+
+test('a normal mail reaches the Harness exactly once', async (t) => {
+  // The poll loop stopped awaiting `accept` so a parked turn cannot stall the
+  // mailbox — but it still called `markSeen` right after, ahead of the bridge's
+  // queue. By the time `#process` ran, `hasSeen` was already true and it
+  // returned immediately: nine polls, a moved cursor, and zero Harness calls.
+  const delivered = [];
+  const { runtime, asks, state } = await startDeliveryRuntime(t, {
+    mailbox: async () => (delivered.length === 0 ? [inboundMail(1)] : []),
+    onHarnessAsk: (options) => { delivered.push(options.text); },
+  });
+  await runtime.start();
+
+  // A single poll is enough: the delivery no longer waits for `start()`.
+  await waitFor(
+    () => asks.length > 0,
+    () => 'the mail never reached the Harness (the poll marked it seen first)',
+  );
+  // Give the loop room to poll again; a re-listing must not run the turn twice.
+  await new Promise((resolve) => { setTimeout(resolve, 120); });
+
+  assert.equal(asks.length, 1, `the Harness ran ${asks.length} times, not exactly once`);
+  assert.match(String(asks[0].content ?? asks[0].text), /body 1/, 'the mail body was delivered');
+  assert.equal(state.hasSeen('<rfc-1@x>'), true, 'the delivery is recorded as handled');
+  assert.equal(state.cursor(), 'msg_1', 'the cursor follows the delivered mail');
+});
+
+test('mail arriving after a parked turn still runs, and only once', async (t) => {
+  // The parked-turn fix must not be undone by this one: a turn that never
+  // settles must not stop later mail from executing, and the later mail must
+  // still run exactly once.
+  let release = null;
+  const parked = new Promise((resolve) => { release = resolve; });
+  const started = [];
+  const { runtime, asks } = await startDeliveryRuntime(t, {
+    mailbox: async () => [inboundMail(1), inboundMail(2)],
+    onHarnessAsk: async (options) => {
+      started.push(options.text);
+      if (started.length === 1) await parked;
+    },
+  });
+  await runtime.start();
+
+  await waitFor(
+    () => asks.length >= 2,
+    () => `later mail was starved by the parked turn (started ${asks.length})`,
+  );
+  release();
+  await new Promise((resolve) => { setTimeout(resolve, 80); });
+  assert.equal(asks.length, 2, `expected two turns, got ${asks.length}`);
+});
+
+test('a delivery that fails is retried on a later poll, not lost', async (t) => {
+  // The runtime no longer marks a message seen before the bridge has run, so a
+  // rejected `accept` must leave the mail eligible for the next poll instead of
+  // silently consuming it.
+  const seenKeys = [];
+  const { runtime, asks } = await startDeliveryRuntime(t, {
+    mailbox: async () => [inboundMail(1)],
+    onHarnessAsk: () => { seenKeys.push(1); },
+  });
+  await runtime.start();
+  const bridge = runtime.bridge;
+  let rejectFirst = true;
+  const accept = bridge.accept.bind(bridge);
+  bridge.accept = (message, options) => {
+    if (rejectFirst) {
+      rejectFirst = false;
+      return Promise.reject(new Error('queue unavailable'));
+    }
+    return accept(message, options);
+  };
+
+  await waitFor(
+    () => asks.length > 0,
+    () => 'the retry never ran after the first delivery was rejected',
+  );
+  assert.equal(asks.length, 1, 'the retry runs the turn exactly once');
+  assert.equal(seenKeys.length, 1);
+});
+
+// ── first bind against a real workspace store ──────────────────────────────
+//
+// The tests above inject a `syncAccessPolicy` stub that cannot fail, which hid
+// a real assembly bug: production's policy sink is `workspaces.setAccessPolicy`,
+// and the workspace record it writes into was only created inside createRuntime
+// — after the policy push. These tests wire the controller the way
+// plugin-src/host/channels/shared/production.mjs does, over a real
+// BotWorkspaceStore, so the ordering is exercised rather than assumed.
+
+/**
+ * Build a controller over a real workspace store, mirroring production: the
+ * workspace record is created by an explicit `ensureWorkspace` hook and the
+ * policy is pushed through `setAccessPolicy`.
+ */
+async function bindWithRealWorkspaces(dir, { ensureWorkspace = true } = {}) {
+  const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+  const { BotWorkspaceStore } = await import('../../../src/channels/shared/bot-workspace-store.mjs');
+  const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+  // A brand-new install: the store has no record for any mailbox yet.
+  const workspaces = await new BotWorkspaceStore(join(dir, 'workspaces.json'), {
+    defaultWorkspace: dir,
+  }).load();
+  const started = [];
+  const controller = new EmailController({
+    credentials: {
+      async resolve() { return null; }, async set() {}, async unset() {},
+    },
+    configStore: store,
+    logger: { warn() {}, info() {}, error() {}, log() {} },
+    transports: { 'imap-smtp': makeStubTransport, 'agent-mail': makeStubTransport },
+    syncAccessPolicy: async (botId, policy) => {
+      await workspaces.setAccessPolicy(botId, policy, {
+        incarnation: workspaces.incarnationFor(botId),
+      });
+    },
+    ...(ensureWorkspace
+      ? { ensureWorkspace: (botId) => workspaces.ensure(botId, {}) }
+      : {}),
+    createRuntime: async ({ botId, config }) => {
+      await workspaces.ensure(botId, {});
+      started.push(config);
+      return {
+        start: async () => {},
+        stop: async () => {},
+        status: { ready: true, connectionState: 'connected' },
+      };
+    },
+  });
+  return { controller, store, workspaces, started };
+}
+
+test('a mailbox bound for the first time syncs its policy and starts its runtime', async () => {
+  // The reported bug: on a fresh directory the policy push ran before the
+  // workspace record existed, so setAccessPolicy refused it with
+  // "workspace-bot-not-found". The user saw "邮箱访问策略同步失败，请重试"
+  // while the mailbox stayed on disk with no runtime.
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-firstbind-'));
+  try {
+    const { controller, store, workspaces, started } = await bindWithRealWorkspaces(dir);
+    const status = await controller.bindMailbox({
+      address: 'fresh@agent.qq.com',
+      transport: 'agent-mail',
+      allowedSenders: ['boss@corp.com'],
+    });
+
+    // 1. The bind succeeds rather than reporting a policy failure.
+    const [bot] = store.list();
+    assert.ok(bot, 'the mailbox is persisted');
+    assert.equal(status.bots.length, 1);
+
+    // 2. The policy actually reached the Harness, carrying the allowlist.
+    const policy = workspaces.accessPolicyFor(bot.botId);
+    assert.ok(policy, 'the access policy was synced into the workspace store');
+    assert.equal(policy.direct.mode, 'allowlist');
+    assert.deepEqual(
+      policy.direct.allowlist.users.map((user) => user.id),
+      ['boss@corp.com'],
+    );
+    assert.equal(policy.direct.open.defaultCanExecuteCommands, false,
+      'nobody outside the allowlist may execute');
+
+    // 3. The runtime is up — not merely configured.
+    assert.equal(started.length, 1, 'the runtime was created and started');
+    assert.equal(status.bots[0].state, 'connected');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('the ordering bug is what the workspace record guards, not the runtime', async () => {
+  // Pins the actual defect: without the pre-sync ensure, the push happens
+  // before any record exists and fails. This is the shape the old code had.
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-norecord-'));
+  try {
+    const { controller, store, workspaces } = await bindWithRealWorkspaces(dir, {
+      ensureWorkspace: false,
+    });
+    await assert.rejects(
+      () => controller.bindMailbox({
+        address: 'fresh@agent.qq.com',
+        transport: 'agent-mail',
+        allowedSenders: ['boss@corp.com'],
+      }),
+      /邮箱访问策略同步失败/,
+    );
+    // And the failed bind left nothing behind.
+    assert.deepEqual(store.list(), [], 'no mailbox survives the failed bind');
+    const { deriveEmailBotIdentity } = await import(
+      '../../../src/channels/email/config-store.mjs'
+    );
+    const { botId } = deriveEmailBotIdentity('fresh@agent.qq.com');
+    assert.equal(workspaces.has(botId), false, 'no workspace record was left behind');
+    assert.ok(!workspaces.accessPolicyFor(botId), 'no policy is half-written');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('a failed first bind rolls the config and credential back', async () => {
+  // State consistency: a mailbox written to disk but neither synced nor
+  // started is unrecoverable from the UI, so the failed bind must undo itself.
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-rollback-'));
+  try {
+    const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    const secrets = new Map();
+    const controller = new EmailController({
+      credentials: {
+        async resolve(ref) {
+          return secrets.has(ref) ? { value: secrets.get(ref) } : null;
+        },
+        async set(ref, value) { secrets.set(ref, value); },
+        async unset(ref) { secrets.delete(ref); },
+      },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: { 'imap-smtp': makeStubTransport, 'agent-mail': makeStubTransport },
+      // The policy sink refuses, standing in for any post-write failure.
+      syncAccessPolicy: async () => { throw new Error('workspace-bot-not-found'); },
+      ensureWorkspace: async () => {},
+      createRuntime: async () => ({
+        start: async () => {}, stop: async () => {}, status: {},
+      }),
+    });
+    await assert.rejects(
+      () => controller.bindMailbox({
+        address: 'fresh@agent.qq.com',
+        transport: 'agent-mail',
+        allowedSenders: ['boss@corp.com'],
+      }),
+      /邮箱访问策略同步失败/,
+    );
+
+    assert.deepEqual(store.list(), [], 'the config is rolled back, not left half-bound');
+    const stored = await controller.status();
+    assert.equal(stored.bots.length, 0, 'the mailbox is gone from the status too');
+    // The credential must not outlive the config it belongs to.
+    const { deriveEmailBotIdentity } = await import(
+      '../../../src/channels/email/config-store.mjs'
+    );
+    const { tokenRef } = deriveEmailBotIdentity('fresh@agent.qq.com');
+    assert.equal(secrets.has(tokenRef), false,
+      'the credential written by the failed bind is removed');
+    assert.equal(secrets.size, 0, 'no stray secret is left in the credential store');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('a failed re-bind restores the mailbox that was already working', async () => {
+  // Rolling back must not delete a pre-existing mailbox: a failed re-bind
+  // (a changed password, say) leaves the previous working config in place.
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-rebind-'));
+  try {
+    const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    await store.save({
+      platformId: 'keep@qq.com', name: 'keep@qq.com', provider: 'qq',
+      allowedSenders: ['old@example.com'],
+    });
+    const [existing] = store.list();
+    const secrets = new Map();
+    let failPolicy = false;
+    const controller = new EmailController({
+      credentials: {
+        async resolve(ref) {
+          return secrets.has(ref) ? { value: secrets.get(ref) } : null;
+        },
+        async set(ref, value) { secrets.set(ref, value); },
+        async unset(ref) { secrets.delete(ref); },
+      },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: { 'imap-smtp': makeStubTransport, 'agent-mail': makeStubTransport },
+      syncAccessPolicy: async () => {
+        if (failPolicy) throw new Error('workspace-bot-not-found');
+      },
+      ensureWorkspace: async () => {},
+      createRuntime: async () => ({ start: async () => {}, stop: async () => {}, status: {} }),
+    });
+
+    failPolicy = true;
+    await assert.rejects(
+      () => controller.bindMailbox({
+        address: 'keep@qq.com', transport: 'agent-mail', allowedSenders: ['new@example.com'],
+      }),
+      /邮箱访问策略同步失败/,
+    );
+
+    const [bot] = store.list();
+    assert.ok(bot, 'the pre-existing mailbox survives a failed re-bind');
+    assert.equal(bot.botId, existing.botId);
+    assert.deepEqual(bot.allowedSenders, ['old@example.com'],
+      'its previous allowlist is restored, not the failed one');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('a successful bind leaves the runtime running and re-syncs the policy on edit', async () => {
+  // The ensure hook must not break updateMailboxSettings, which shares
+  // #applyAllowlistToPolicy but runs with the record already in place.
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-editpolicy-'));
+  try {
+    const { controller, store, workspaces } = await bindWithRealWorkspaces(dir);
+    await controller.bindMailbox({
+      address: 'fresh@agent.qq.com', transport: 'agent-mail', allowedSenders: ['a@x.com'],
+    });
+    const [bot] = store.list();
+
+    await controller.updateMailboxSettings(bot.botId, {
+      allowedSenders: ['b@x.com', 'c@x.com'],
+    });
+
+    const policy = workspaces.accessPolicyFor(bot.botId);
+    assert.deepEqual(
+      policy.direct.allowlist.users.map((user) => user.id),
+      ['b@x.com', 'c@x.com'],
+      'the edited allowlist replaces the bound one',
+    );
+    const status = controller.status();
+    assert.equal(status.bots[0].state, 'connected', 'the runtime is still connected');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('a runtime that fails to start keeps the config instead of rolling back', async () => {
+  // The rollback covers failures that leave the mailbox unusable *and*
+  // unretryable. A transport that cannot connect is neither: the config is
+  // valid, the policy is synced, and a later reconnect can succeed — so it must
+  // survive, reported as an error state rather than thrown away.
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-rtfail-'));
+  try {
+    const { EmailController } = await import('../../../src/channels/email/email-controller.mjs');
+    const store = await new EmailConfigStore(join(dir, 'config.json')).load();
+    const synced = [];
+    const controller = new EmailController({
+      credentials: { async resolve() { return null; }, async set() {}, async unset() {} },
+      configStore: store,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      transports: { 'imap-smtp': makeStubTransport, 'agent-mail': makeStubTransport },
+      syncAccessPolicy: async (botId, policy) => { synced.push({ botId, policy }); },
+      ensureWorkspace: async () => {},
+      createRuntime: async () => ({
+        start: async () => { throw new Error('ECONNREFUSED'); },
+        stop: async () => {}, status: {},
+      }),
+    });
+
+    const status = await controller.bindMailbox({
+      address: 'flaky@agent.qq.com', transport: 'agent-mail', allowedSenders: ['a@x.com'],
+    });
+
+    assert.equal(store.list().length, 1, 'the valid config survives a runtime failure');
+    assert.equal(synced.length, 1, 'and its policy was still synced');
+    assert.equal(status.bots[0].state, 'error',
+      'the mailbox reports the connection failure rather than disappearing');
+    assert.equal(status.bots[0].connected, false);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 });

@@ -72,6 +72,7 @@ function stateFixture(initialSessions = {}) {
       async clearSession(key) { sessions.delete(key); },
       hasSeen(messageId) { return seen.has(messageId); },
       async markSeen(messageId) { seen.add(messageId); },
+      async unmarkSeen(messageId) { return seen.delete(messageId); },
     },
   };
 }
@@ -3068,3 +3069,195 @@ for (const outcome of ['success', 'failure']) {
     await accepted;
   });
 }
+
+// Email decorates `content` with the mail headers for the model while
+// `controlText` keeps the plain body. Both the command-permission gate and the
+// approval queue parse text, so both must read the control text — reading the
+// decorated form made `/new` unrecognizable as a command (skipping the
+// permission gate) and made "批准" unrecognizable as a decision (approval
+// callback stayed at 0).
+function emailMessage(messageId, body, overrides = {}) {
+  return message(messageId, `From: sender@example.com\nSubject: 测试主题\n\n${body}`, {
+    controlText: body,
+    ...overrides,
+  });
+}
+
+test('a decorated body still has its command gated by canExecuteCommands', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const asks = [];
+  let sessionClears = 0;
+  const originalClearSession = fixture.state.clearSession.bind(fixture.state);
+  fixture.state.clearSession = async (...args) => {
+    sessionClears += 1;
+    return originalClearSession(...args);
+  };
+  let settings = accessPolicy({ canExecuteCommands: false });
+  const bridge = new TextHarnessBridge({
+    descriptor: { key: 'test', label: 'Test' },
+    state: fixture.state,
+    logger: { warn() {}, error() {} },
+    accessPolicy: {
+      getSettings: () => settings,
+      isPrivileged: () => false,
+    },
+    bot: { sendText: async (_target, text) => sent.push(text) },
+    harness: {
+      createSession: async () => 'session-header-gate',
+      sessionExists: async () => true,
+      ask: async (_sessionId, content) => {
+        asks.push(content);
+        return 'sessions cleared';
+      },
+    },
+  });
+
+  // Seed a session so a denied `/new` would have something to clear.
+  await bridge.accept(emailMessage('header-ordinary', '你好'));
+  assert.equal(asks.length, 1, 'an ordinary decorated message still reaches Harness');
+
+  await bridge.accept(emailMessage('header-command-denied', '/new'));
+  assert.equal(sessionClears, 0,
+    'a decorated `/new` is still recognized as a command and refused');
+  assert.equal(sent.at(-1), COMMAND_PERMISSION_DENIED_MESSAGE,
+    'the sender is told the command was denied');
+
+  settings = accessPolicy({ canExecuteCommands: true });
+  await bridge.accept(emailMessage('header-command-allowed', '/new'));
+  assert.equal(sessionClears, 1, 'a permitted sender may still run the command');
+});
+
+test('an approval reply in a decorated body claims the pending request', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const submitted = [];
+  const answered = deferred();
+  const bridge = createBridge({
+    state: fixture.state,
+    bot: { sendText: async (target, text) => sent.push({ target, text }) },
+    harness: {
+      createSession: async () => 'session-decorated-approval',
+      ask: async (sessionId, _text, options) => {
+        await options.onInteraction(approvalInteraction({
+          id: 'decorated-approval',
+          sessionId,
+          toolName: 'decorated-tool',
+          respond: async (result) => {
+            submitted.push(result);
+            answered.resolve();
+            return { accepted: true };
+          },
+        }));
+        await answered.promise;
+        return '审批完成';
+      },
+    },
+  });
+
+  const processing = bridge.accept(emailMessage('decorated-approval-start', '启动审批'));
+  await eventually(() => sent.some(({ text }) => text.includes('decorated-tool')));
+  await bridge.accept(emailMessage('decorated-approval-reply', '批准'));
+  await processing;
+
+  assert.equal(submitted.length, 1, 'the plain-body approval claimed the request');
+  assert.deepEqual(submitted[0], {
+    ok: true,
+    value: {
+      sessionId: 'session-decorated-approval',
+      approvalId: 'decorated-approval',
+      outcome: 'allowed-once',
+    },
+  });
+});
+
+// A failed turn used to leave `markSeen` behind, turning the id into a permanent
+// tombstone: every later poll short-circuited on `hasSeen` and the message was
+// never retried. A failure must release the mark (bounded), while a success
+// stays exactly-once.
+test('a failed delivery is retried on the next poll instead of being dropped', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const asks = [];
+  let failFirst = true;
+  const bridge = createBridge({
+    state: fixture.state,
+    bot: { sendText: async (_target, text) => sent.push(text) },
+    harness: {
+      createSession: async () => 'session-retry',
+      sessionExists: async () => true,
+      ask: async (_sessionId, text) => {
+        asks.push(text);
+        if (failFirst) {
+          failFirst = false;
+          throw new Error('transient Harness outage');
+        }
+        return '恢复后的答复';
+      },
+    },
+  });
+
+  await bridge.accept(emailMessage('retry-mail', '第一封信'));
+  assert.equal(asks.length, 1, 'the first attempt was delivered and failed');
+  assert.equal(fixture.seen.has('retry-mail'), false,
+    'a failed turn releases its mark so the mail is not lost');
+
+  // The next poll re-presents the same message id.
+  await bridge.accept(emailMessage('retry-mail', '第一封信'));
+  assert.equal(asks.length, 2, 'the next poll re-delivers the same message');
+  assert.equal(sent.at(-1), '恢复后的答复', 'the retry produced the real answer');
+  assert.equal(fixture.seen.has('retry-mail'), true,
+    'a successful retry is marked as handled');
+});
+
+test('a successful delivery stays exactly-once across repeated polls', async () => {
+  const fixture = stateFixture();
+  const asks = [];
+  const bridge = createBridge({
+    state: fixture.state,
+    bot: { sendText: async () => undefined },
+    harness: {
+      createSession: async () => 'session-once',
+      sessionExists: async () => true,
+      ask: async (_sessionId, text) => {
+        asks.push(text);
+        return '唯一一次答复';
+      },
+    },
+  });
+
+  await bridge.accept(emailMessage('once-mail', '只处理一次'));
+  await bridge.accept(emailMessage('once-mail', '只处理一次'));
+  await bridge.accept(emailMessage('once-mail', '只处理一次'));
+
+  assert.equal(asks.length, 1, 'a delivered message is never executed twice');
+  assert.equal(fixture.seen.has('once-mail'), true);
+});
+
+test('a permanently failing delivery stops retrying after a bounded number of attempts', async () => {
+  const fixture = stateFixture();
+  const asks = [];
+  const bridge = createBridge({
+    state: fixture.state,
+    bot: { sendText: async () => undefined },
+    harness: {
+      createSession: async () => 'session-bounded',
+      sessionExists: async () => true,
+      ask: async (_sessionId, text) => {
+        asks.push(text);
+        throw new Error('permanent Harness outage');
+      },
+    },
+  });
+
+  // Poll far more often than the retry budget allows.
+  for (let poll = 0; poll < 10; poll += 1) {
+    await bridge.accept(emailMessage('poison-mail', '永远失败的信'));
+  }
+
+  assert.ok(asks.length > 1, 'a transient-looking failure is retried at least once');
+  assert.ok(asks.length <= 3,
+    `retries are bounded, but the message was attempted ${asks.length} times`);
+  assert.equal(fixture.seen.has('poison-mail'), true,
+    'after the budget is spent the id becomes a tombstone instead of retrying forever');
+});

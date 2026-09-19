@@ -5,6 +5,9 @@ import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 export const EMAIL_RPC_CHANNEL = '/email';
 export const EMAIL_ENDPOINTS = Object.freeze({
   status: 'connection.status',
+  // Lets the client hide the mailbox entry point while the channel is closed,
+  // instead of offering a form whose submissions the Host would refuse.
+  availability: 'channel.availability',
   bindMailbox: 'bot.bind-mailbox',
   updateMailbox: 'bot.mailbox.update',
   reconnectBot: 'bot.reconnect',
@@ -56,8 +59,22 @@ function withRpcDetails(result) {
  * payload shapes.
  */
 export function createEmailRpcHandler(controller) {
-  const shared = createTokenBotRpcHandler(controller, { channel: 'Email' });
+  // Availability is answered before anything else, including the controller
+  // shape check: the client asks this endpoint to decide whether to show the
+  // mailbox entry point at all, so it must work even while the channel is
+  // closed and no controller is wired.
+  //
+  // While the channel is closed the settings page must still get a clear,
+  // non-throwing answer rather than a crash from an unwired controller; every
+  // other endpoint fails closed through `controller.disabled()`.
+  const disabled = typeof controller?.disabled === 'function';
+  const closed = disabled ? controller.disabled() : null;
+  const shared = disabled ? null : createTokenBotRpcHandler(controller, { channel: 'Email' });
   return async (endpoint, payload, signal) => {
+    if (endpoint === EMAIL_ENDPOINTS.availability) {
+      return { ok: true, value: { enabled: !disabled } };
+    }
+    if (disabled) return closed;
     if (endpoint === EMAIL_ENDPOINTS.bindMailbox) {
       try {
         return { ok: true, value: await controller.bindMailbox(payload ?? {}) };

@@ -190,7 +190,7 @@ test('removing the first account preserves collapse styles and toggling for rema
   }
 });
 
-test('IM settings renders twelve IM channels plus the AI Office connector', async () => {
+test('IM settings renders eleven IM channels plus the AI Office connector', async () => {
   const { default: packageMetadata } = await import('../package.json', {
     with: { type: 'json' },
   });
@@ -285,7 +285,10 @@ test('IM settings renders twelve IM channels plus the AI Office connector', asyn
   assert.match(markup, /dim-logoIMessage/);
   assert.match(markup, /dim-logoOffice/);
   assert.match(styles, /\.dim-logoFeishu svg \{ width: 28px; height: 28px; \}/);
-  assert.equal((markup.match(/role="tab"/g) ?? []).length, 13);
+  // Email ships closed, and this render's `emailRpcCall` never reports it as
+  // enabled, so the mailbox entry point is omitted: eleven IM channels plus the
+  // AI Office connector. The email tab is covered separately below.
+  assert.equal((markup.match(/role="tab"/g) ?? []).length, 12);
   assert.equal((markup.match(/aria-selected="true"/g) ?? []).length, 1);
   assert.doesNotMatch(markup, /role="switch"|type="checkbox"/);
   assert.doesNotMatch(markup, /dim-chevron|扫码绑定<\/small>|扫码接入<\/small>/);
@@ -2080,5 +2083,54 @@ test('an IMAP mailbox is not offered re-authorization', async () => {
   const labels = renderer.root.findAll((node) => node.type === 'button').map((b) => textOf(b.children));
   assert.ok(!labels.includes('重新扫码授权'),
     'a password mailbox has nothing to re-authorize');
+  renderer.unmount();
+});
+
+test('the email entry point stays hidden while the Host reports the channel closed', async () => {
+  const textOf = (node) => {
+    if (typeof node === 'string') return node;
+    if (Array.isArray(node)) return node.map(textOf).join('');
+    if (node?.children) return textOf(node.children);
+    return '';
+  };
+  const rpcCalls = Object.fromEntries(
+    ['feishu', 'weixin', 'dingtalk', 'wecom', 'wecomApp', 'qq', 'slack', 'telegram',
+      'discord', 'whatsapp', 'imessage', 'office']
+      .map((channel) => [`${channel}RpcCall`, async () => ({ ok: true, value: {} })]),
+  );
+  const closed = [];
+  let renderer;
+  await TestRenderer.act(async () => {
+    renderer = TestRenderer.create(React.createElement(IMSettingsTab, {
+      ...rpcCalls,
+      emailRpcCall: async (endpoint) => {
+        closed.push(endpoint);
+        return { ok: false, error: { code: 'email-channel-disabled', message: 'Email is not available yet.' } };
+      },
+    }));
+  });
+  const labels = () => renderer.root
+    .findAll((node) => node.type === 'button')
+    .map((node) => textOf(node.children));
+  // The rail button renders the label and its note together.
+  const hasMailbox = () => labels().some((label) => label.startsWith('邮箱'));
+  assert.equal(hasMailbox(), false,
+    'a closed channel exposes no mailbox entry point');
+  await TestRenderer.act(async () => {
+    renderer = TestRenderer.create(React.createElement(IMSettingsTab, {
+      ...rpcCalls,
+      emailRpcCall: async () => ({ ok: true, value: { enabled: false } }),
+    }));
+  });
+  assert.equal(hasMailbox(), false,
+    'an explicit closed answer also hides the entry point');
+  await TestRenderer.act(async () => {
+    renderer = TestRenderer.create(React.createElement(IMSettingsTab, {
+      ...rpcCalls,
+      emailRpcCall: async () => ({ ok: true, value: { enabled: true } }),
+    }));
+  });
+  assert.equal(hasMailbox(), true,
+    'reopening the Host switch brings the entry point back with no client change');
   renderer.unmount();
 });

@@ -29,6 +29,19 @@ export { AgentMailCliError as AgentMailError };
 /** How many messages one poll may return. */
 const DEFAULT_PAGE_SIZE = 25;
 
+/**
+ * The most list pages one poll may walk.
+ *
+ * The provider caps a page at 25 summaries and rate-limits tightly, so the walk
+ * that seeds a fresh mailbox is bounded rather than following `next_cursor`
+ * through an arbitrarily long backlog. The bound is deliberately generous: a
+ * walk that stops short of the oldest mail cannot return it without either
+ * skipping the mail beneath or stranding it behind a cursor, so the seed walk
+ * must be allowed to reach the true bottom. 40 pages covers a 1000-message
+ * backlog, and an ordinary poll stops at the cursor after one page.
+ */
+const MAX_LIST_PAGES = 40;
+
 /** Mailbox folders the CLI understands. */
 const INBOX = 'inbox';
 
@@ -297,55 +310,85 @@ export class AgentMailTransport {
   /**
    * New mail, oldest first.
    *
-   * The CLI lists newest-first, so the page is reversed here. The body is
-   * fetched per message because the list carries only a snippet; senders are
-   * filtered first so an unlisted address costs no extra call.
+   * The provider lists newest-first and caps a page at 25 summaries, so the
+   * oldest unhandled batch is usually only reachable by following the page
+   * cursor: with a 30-message backlog the five oldest sit on the second page.
+   * Reversing a single page therefore both skipped the backlog (the cursor then
+   * advanced past it) and, on the next poll, re-delivered the same handled mail
+   * — burning rate limit on bodies already read.
+   *
+   * The walk here is over summaries only. A summary is filtered by the cursor
+   * and the sender allowlist first, so a body is fetched exactly once, for mail
+   * this call actually returns.
    */
   async listMessages({ afterUid = null, limit = DEFAULT_PAGE_SIZE, allowSenders = null } = {}) {
     // A Set — even an empty one — means the caller supplied a policy: an
     // empty allowlist admits nobody, so no body is fetched at all. Treating
     // it as "no filter" downloaded mail the policy had already refused.
     const allowed = allowSenders instanceof Set ? allowSenders : null;
-    const collected = [];
+    const handledUid = afterUid === null || afterUid === undefined ? null : String(afterUid);
+    // Newest-first summaries of unhandled, allowed mail, newest first across
+    // every page walked; reversed into age order once the walk ends.
+    const pending = [];
     let cursor = '';
+    // Whether the walk actually reached the handled boundary. When the page cap
+    // stops it first, the backlog below the deepest page is still unseen, so the
+    // batch must stay contiguous with the cursor instead of skipping ahead.
+    // With no cursor there is no known boundary to reach, so the walk simply
+    // goes as deep as the page cap allows.
+    let reachedHandled = false;
 
-    for (let page = 0; page < 5; page += 1) {
+    for (let page = 0; page < MAX_LIST_PAGES; page += 1) {
       const args = ['message', '+list', '--dir', INBOX, '--limit', String(DEFAULT_PAGE_SIZE)];
       if (cursor) args.push('--cursor', cursor);
       const { document } = await this.#call(args, { signal: this.#signal });
       const items = Array.isArray(document?.data?.data) ? document.data.data : [];
+      if (items.length === 0) {
+        // The mailbox ends here, so nothing older than this page is pending.
+        reachedHandled = true;
+        break;
+      }
 
-      // The API lists newest-first, so a page is reversed into age order before
-      // the limit applies. Taking the newest `limit` entries instead skipped the
-      // older backlog: with 30 messages pending and a limit of 25, the five
-      // oldest were never delivered, and the cursor then advanced past them.
-      const pageItems = items.slice().reverse();
-      let reachedHandled = false;
-      for (const raw of pageItems) {
+      // Summaries arrive newest-first, so stopping at the cursor keeps the
+      // backlog older than it out of this batch.
+      for (const raw of items) {
         const id = String(raw?.message_id ?? '').trim();
         if (!id) continue;
-        // The cursor is the newest already-handled id: it is skipped, and
-        // everything newer than it (already collected) is kept. Breaking here
-        // instead returned an empty page whenever the cursor was the oldest
-        // entry on the page — which is the common case.
-        if (afterUid !== null && afterUid !== undefined && id === String(afterUid)) {
+        if (handledUid !== null && id === handledUid) {
           reachedHandled = true;
-          continue;
+          break;
         }
         if (allowed && !allowed.has(normalizeAddress(raw?.from?.email))) continue;
-        collected.push(raw);
-      }
-      // Returning only on the limit is what lost the backlog: the oldest
-      // unhandled batch is returned, and the cursor follows it forward.
-      if (collected.length >= limit || reachedHandled) {
-        return this.#oldestFirst(collected.slice(0, limit), allowed);
+        pending.push(raw);
       }
 
+      // The walk stops once the cursor is covered: everything older than it is
+      // already handled, so paging further would only re-read processed mail.
+      //
+      // `limit` deliberately never stops the walk: pages are newest-first, so
+      // the oldest unhandled mail sits on the LAST page reached, not the first.
+      // Breaking as soon as `limit` summaries had been collected is what left
+      // the 5-message tail of a 30-message backlog on an unread page and then
+      // advanced the cursor past it.
+      if (reachedHandled) break;
+
       const next = String(document?.data?.pagination?.next_cursor ?? '');
-      if (!next || items.length === 0) break;
+      if (!next || next === cursor) {
+        reachedHandled = true;
+        break;
+      }
       cursor = next;
     }
-    return this.#oldestFirst(collected, allowed);
+
+    // `pending` is newest-first, so the oldest `limit` entries are its tail.
+    // That tail is only the mailbox's oldest unhandled mail once the walk has
+    // reached the handled boundary (or the end of a fresh mailbox). While the
+    // backlog below the deepest page is still unseen, the tail would advance
+    // the cursor past pages nobody read, stranding them; the head is taken
+    // instead, which keeps the batch contiguous so the remaining backlog is
+    // drained from the top on the polls that follow.
+    const batch = (reachedHandled ? pending.slice(-limit) : pending.slice(0, limit)).reverse();
+    return this.#oldestFirst(batch, allowed);
   }
 
   /** Oldest-first, with each message's body and RFC id filled in. */

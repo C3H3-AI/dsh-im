@@ -51,7 +51,7 @@ import { installWhatsappStyles } from './channels/whatsapp/styles.js';
 import { IMESSAGE_RPC_CHANNEL } from './channels/imessage/api.js';
 import { EMAIL_RPC_CHANNEL } from './channels/email/api.js';
 import { IMessageSettingsTab } from './channels/imessage/index.js';
-import { EmailSettingsTab } from './channels/email/index.js';
+import { EmailSettingsTab, useEmailChannelEnabled } from './channels/email/index.js';
 import { installIMessageStyles } from './channels/imessage/styles.js';
 import { installEmailStyles } from './channels/email/styles.js';
 import { en, h, IM_LOCALE_NAMESPACE, setImTranslator, zh } from './i18n.js';
@@ -228,10 +228,18 @@ export function IMSettingsTab({
   const [loopbackRecovery, setLoopbackRecovery] = React.useState(null);
   const [runningVersion, setRunningVersion] = React.useState(IM_PLUGIN_VERSION);
   const [deliverySettings, setDeliverySettings] = React.useState(null);
+  // Email ships closed; the Host owns that switch and reports it over RPC. The
+  // mailbox entry point is omitted entirely while it is closed, and the visible
+  // channel list is what every later lookup (active tab, rail) reads from.
+  const emailEnabled = useEmailChannelEnabled(emailRpcCall);
+  const visibleChannels = React.useMemo(
+    () => CHANNELS.filter((channel) => channel.id !== 'email' || emailEnabled),
+    [emailEnabled],
+  );
   const githubTooltipId = React.useId();
   const generalSettingsTooltipId = React.useId();
   const globalSettingsSelected = selected === GLOBAL_SETTINGS_TAB_ID;
-  const active = CHANNELS.find((channel) => channel.id === selected) ?? CHANNELS[0];
+  const active = visibleChannels.find((channel) => channel.id === selected) ?? visibleChannels[0];
   const activeTabId = globalSettingsSelected
     ? 'dim-general-settings-trigger'
     : `dim-tab-${active.id}`;
@@ -339,7 +347,7 @@ export function IMSettingsTab({
     ),
     h('div', { className: 'dim-layout' },
       h('nav', { className: 'dim-rail', role: 'tablist', 'aria-label': 'IM 设置导航' },
-        CHANNELS.map((channel) => h('button', {
+        visibleChannels.map((channel) => h('button', {
           key: channel.id,
           type: 'button',
           role: 'tab',

@@ -78,6 +78,16 @@ export async function createTokenProductionController(ctx, config, internals, de
   const observedConfigStore = typeof configStore.remove === 'function'
     ? observeBotWorkspaceRemovals(configStore, { workspaces })
     : configStore;
+  // Idempotent, and shared with createRuntime below so both paths seed a new
+  // bot's workspace identically. A channel that must write something into the
+  // workspace store before the runtime exists (email pushes its sender
+  // allowlist into the access policy) needs the record to exist first —
+  // setAccessPolicy refuses a bot the store has never seen. The call is safe to
+  // repeat: ensure() only seeds the policy when the bot has none yet.
+  const ensureWorkspace = (botId, botConfig) => workspaces.ensure(botId, {
+    defaultAgentPreset: config.agentPreset,
+    initialAccessPolicy: seedAccessPolicy(botConfig),
+  });
   const stateStores = new Map();
   const statePath = (botId) => resolve(paths.bots, botId, 'state.json');
   const stateFor = async (botId) => {
@@ -131,6 +141,9 @@ export async function createTokenProductionController(ctx, config, internals, de
           incarnation: workspaces.incarnationFor(botId),
         });
       },
+      // Exposed so the controller can create the workspace record before it
+      // pushes a policy into it.
+      ensureWorkspace,
     } : {}),
     // Channels that pin conversations to an existing session need the per-bot
     // state and the session catalog to drive their settings UI.
@@ -142,10 +155,7 @@ export async function createTokenProductionController(ctx, config, internals, de
     } : {}),
     createRuntime: async ({ botId, config: botConfig, token, credential, createTransport }) => {
       const state = await stateFor(botId);
-      await workspaces.ensure(botId, {
-        defaultAgentPreset: config.agentPreset,
-        initialAccessPolicy: seedAccessPolicy(botConfig),
-      });
+      await ensureWorkspace(botId, botConfig);
       const workspaceScope = createBotWorkspaceScope(harness, {
         botId, workspaces, state, agentPresetCatalog,
       });

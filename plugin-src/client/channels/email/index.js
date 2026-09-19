@@ -698,3 +698,30 @@ const channel = createTokenChannelSettings(EMAIL_SETTINGS_DEFINITION);
 
 export const EmailSettingsTab = channel.SettingsTab;
 export const EmailAccountCard = channel.AccountCard;
+
+/**
+ * Whether the Host currently offers the email channel.
+ *
+ * Email ships closed, and the Host is the single authority on that switch. The
+ * settings rail asks once through this hook and simply omits the mailbox entry
+ * point while it is closed — an absent default (`null`, before the answer
+ * arrives, or when the call fails) hides the entry rather than briefly flashing
+ * a form the Host would refuse.
+ */
+export function useEmailChannelEnabled(rpcCall) {
+  const [enabled, setEnabled] = React.useState(null);
+  React.useEffect(() => {
+    if (typeof rpcCall !== 'function') return undefined;
+    let active = true;
+    Promise.resolve()
+      .then(() => rpcCall(EMAIL_ENDPOINTS.availability))
+      .then((result) => {
+        if (!active) return;
+        const value = result?.ok === false ? null : (result?.value ?? result);
+        setEnabled(value?.enabled === true);
+      })
+      .catch(() => { if (active) setEnabled(false); });
+    return () => { active = false; };
+  }, [rpcCall]);
+  return enabled === true;
+}
