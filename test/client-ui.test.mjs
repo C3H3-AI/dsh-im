@@ -285,7 +285,7 @@ test('IM settings renders eleven IM channels plus the AI Office connector', asyn
   assert.match(markup, /dim-logoIMessage/);
   assert.match(markup, /dim-logoOffice/);
   assert.match(styles, /\.dim-logoFeishu svg \{ width: 28px; height: 28px; \}/);
-  // Email ships closed, and this render's `emailRpcCall` never reports it as
+  // This render's `emailRpcCall` never reports the channel as
   // enabled, so the mailbox entry point is omitted: eleven IM channels plus the
   // AI Office connector. The email tab is covered separately below.
   assert.equal((markup.match(/role="tab"/g) ?? []).length, 12);

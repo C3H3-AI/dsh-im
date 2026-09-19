@@ -234,7 +234,7 @@ export function IMSettingsTab({
   const [loopbackRecovery, setLoopbackRecovery] = React.useState(null);
   const [runningVersion, setRunningVersion] = React.useState(IM_PLUGIN_VERSION);
   const [deliverySettings, setDeliverySettings] = React.useState(null);
-  // Email ships closed; the Host owns that switch and reports it over RPC. The
+  // The Host owns email availability and reports it over RPC. The
   // mailbox entry point is omitted entirely while it is closed, and the visible
   // channel list is what every later lookup (active tab, rail) reads from.
   const emailEnabled = useEmailChannelEnabled(emailRpcCall);

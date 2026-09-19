@@ -702,7 +702,7 @@ export const EmailAccountCard = channel.AccountCard;
 /**
  * Whether the Host currently offers the email channel.
  *
- * Email ships closed, and the Host is the single authority on that switch. The
+ * The Host is the single authority on the channel's availability. The
  * settings rail asks once through this hook and simply omits the mailbox entry
  * point while it is closed — an absent default (`null`, before the answer
  * arrives, or when the call fails) hides the entry rather than briefly flashing

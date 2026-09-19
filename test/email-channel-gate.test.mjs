@@ -12,13 +12,13 @@ import {
 import { createEmailRpcHandler, EMAIL_ENDPOINTS } from '../plugin-src/host/channels/email/rpc.mjs';
 
 /**
- * The email channel ships closed. These tests pin what closing must do — refuse
+ * The email channel is enabled by default. These tests pin what opting out does — refuse
  * the entry point and start no runtime — and that nothing is deleted, so
  * reopening the single switch brings every mailbox back.
  */
 
-test('the email switch is closed by default and opens only on an explicit truthy value', () => {
-  assert.equal(isEmailChannelEnabled({}, {}), false, 'closed with nothing configured');
+test('the email switch is enabled by default and supports explicit opt-out', () => {
+  assert.equal(isEmailChannelEnabled({}, {}), true, 'enabled with nothing configured');
   assert.equal(isEmailChannelEnabled({}, { [EMAIL_CHANNEL_ENABLED_ENV]: '0' }), false);
   assert.equal(isEmailChannelEnabled({}, { [EMAIL_CHANNEL_ENABLED_ENV]: 'false' }), false);
   assert.equal(isEmailChannelEnabled({}, { [EMAIL_CHANNEL_ENABLED_ENV]: '' }), false);
@@ -34,7 +34,7 @@ test('the email switch is closed by default and opens only on an explicit truthy
 test('the host gate reports a closed channel without throwing', () => {
   assert.equal(emailChannelGate({ emailChannelEnabled: true }, {}), null,
     'an open channel has no gate');
-  const closed = emailChannelGate({}, {});
+  const closed = emailChannelGate({ emailChannelEnabled: false }, {});
   assert.equal(closed.ok, false);
   assert.equal(closed.error.code, 'email-channel-disabled');
 });
@@ -86,7 +86,7 @@ test('closing starts no runtime and deletes nothing, so reopening keeps every ma
     await writeFile(configPath, JSON.stringify(seeded));
 
     // Closing is a gate decision, not a migration: it never touches the store.
-    assert.notEqual(emailChannelGate({}, {}), null, 'the channel is closed');
+    assert.notEqual(emailChannelGate({ emailChannelEnabled: false }, {}), null, 'the channel is closed');
 
     const onDisk = JSON.parse(await readFile(configPath, 'utf8'));
     assert.deepEqual(onDisk, seeded,
