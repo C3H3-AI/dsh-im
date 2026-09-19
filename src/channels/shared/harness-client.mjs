@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 
 import { adoptRegisteredWorkspaceSession } from './harness-session-binding.mjs';
+import { sameWorkspacePath } from './default-workspace.mjs';
 import {
   appendInboundFilesToPrompt,
   InboundFileError,
@@ -717,6 +719,7 @@ export class HarnessClient {
   #baseUrl;
   #apiProxy;
   #workspace;
+  #ungroupedWorkspace;
   #agentPreset;
   #autostart;
   #dshBin;
@@ -740,6 +743,7 @@ export class HarnessClient {
     apiProxy,
     interactionScope = apiProxy,
     workspace,
+    ungroupedWorkspace,
     agentPreset,
     autostart = false,
     dshBin = 'dsh',
@@ -788,6 +792,8 @@ export class HarnessClient {
       throw new TypeError('interactionScope must identify the current Host');
     }
     this.#workspace = workspace;
+    // Only the reserved IM directory bypasses grouping, even after /ws switches.
+    this.#ungroupedWorkspace = ungroupedWorkspace;
     // Keep an omitted preset absent so session.create resolves the Host's current default.
     this.#agentPreset = agentPreset ?? undefined;
     this.#autostart = Boolean(this.#baseUrl && autostart);
@@ -921,6 +927,38 @@ export class HarnessClient {
     await this.ensureRunning(options);
     const workspaceList = await this.rpc('workspace.list', {}, 30_000, options);
     const workspace = workspaceFromList(workspacePath, workspaceList);
+    if (await this.isUngroupedWorkspace(workspacePath)) {
+      const sessionList = await this.rpc('session.list', {}, 30_000, options);
+      if (!Array.isArray(sessionList?.items)) {
+        throw new Error('Harness returned an invalid response for session.list');
+      }
+      const registered = new Set();
+      const selected = new Set();
+      for (const item of workspaceList.items) {
+        if (!Array.isArray(item?.sessionIds)
+          || item.sessionIds.some((id) => typeof id !== 'string' || !id)) {
+          throw new Error('Harness returned invalid session IDs for workspace.list');
+        }
+        for (const id of item.sessionIds) registered.add(id);
+        if (await sameWorkspacePath(item.path, workspacePath)) {
+          for (const id of item.sessionIds) selected.add(id);
+        }
+      }
+      for (const item of sessionList.items) {
+        if (typeof item?.sessionId !== 'string' || !item.sessionId) {
+          throw new Error('Harness returned an invalid response for session.list');
+        }
+        // A matching cwd never overrides an explicit group assignment.
+        if (!registered.has(item.sessionId) && await this.isUngroupedWorkspace(item.cwd)) {
+          selected.add(item.sessionId);
+        }
+      }
+      return workspaceSessions(
+        { path: workspacePath, sessionIds: [...selected] },
+        workspaceList.archivedSessionIds,
+        sessionList,
+      );
+    }
     if (!workspace) return { workspace: workspacePath, sessions: [] };
     const sessionList = await this.rpc('session.list', {}, 30_000, options);
     return workspaceSessions(workspace, workspaceList.archivedSessionIds, sessionList);
@@ -988,6 +1026,10 @@ export class HarnessClient {
     return adoptRegisteredWorkspaceSession(this, value, options);
   }
 
+  async isUngroupedWorkspace(workspace) {
+    return sameWorkspacePath(workspace, this.#ungroupedWorkspace);
+  }
+
   async workspaceId(options = {}) {
     const { workspace = this.#workspace, ...rpcOptions } = options;
     const { items } = await this.rpc('workspace.list', {}, 30_000, rpcOptions);
@@ -999,9 +1041,13 @@ export class HarnessClient {
 
   async createSession(options = {}) {
     const { agentPreset: requestedPreset, ...rpcOptions } = options;
+    const workspace = rpcOptions.workspace ?? this.#workspace;
+    const ungrouped = await this.isUngroupedWorkspace(workspace);
+    if (ungrouped) await mkdir(workspace, { recursive: true });
     await this.ensureRunning(rpcOptions);
-    const workspaceId = await this.workspaceId(rpcOptions);
-    const payload = { workspaceId };
+    const payload = ungrouped
+      ? { cwd: workspace }
+      : { workspaceId: await this.workspaceId(rpcOptions) };
     const agentPreset = requestedPreset !== undefined ? requestedPreset : this.#agentPreset;
     if (agentPreset != null) payload.agentPreset = agentPreset;
     const created = await this.rpc('session.create', payload, 30_000, rpcOptions);

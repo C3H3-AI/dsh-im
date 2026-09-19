@@ -1,4 +1,5 @@
 import { validateBotAlias, withBotAlias } from './bot-alias.mjs';
+import { defaultImWorkspace, sameWorkspacePath } from './default-workspace.mjs';
 import {
   mkdir,
   readFile,
@@ -50,15 +51,6 @@ function workspaceSessionStale(message) {
 
 async function canonicalWorkspacePath(value) {
   return resolve(await realpath(value));
-}
-
-async function sameWorkspacePath(left, right) {
-  if (left === right) return true;
-  try {
-    return await canonicalWorkspacePath(left) === await canonicalWorkspacePath(right);
-  } catch {
-    return false;
-  }
 }
 
 function botIdOf(value) {
@@ -420,7 +412,7 @@ export class BotWorkspaceStore {
   #writeQueue = Promise.resolve();
   #botQueues = new Map();
 
-  constructor(path, { defaultWorkspace = process.cwd() } = {}) {
+  constructor(path, { defaultWorkspace = defaultImWorkspace() } = {}) {
     if (typeof path !== 'string' || !path) throw new TypeError('workspace store path is required');
     this.#path = path;
     this.#defaultWorkspace = resolve(defaultWorkspace);
@@ -1597,6 +1589,7 @@ export function createBotWorkspaceScope(
     if (!sessionId) return true;
     let sessionWorkspace = sessionGenerations.get(sessionId)?.workspace;
     let matches = false;
+    let unregistered = true;
     if (!sessionWorkspace && typeof harness.rpc === 'function') {
       // Read registration metadata only: adopting a Session is not a lookup.
       // Resolve by id before comparing real paths so symlink pins remain valid.
@@ -1609,7 +1602,11 @@ export function createBotWorkspaceScope(
       if (owners.length === 1 && typeof owners[0].path === 'string' && isAbsolute(owners[0].path)) {
         sessionWorkspace = owners[0].path;
       }
-    } else if (!sessionWorkspace && typeof harness.listWorkspaceSessions === 'function') {
+      unregistered = owners.length === 0;
+    }
+    if (!sessionWorkspace && unregistered && typeof harness.listWorkspaceSessions === 'function') {
+      // After a restart, default IM sessions have no registry owner. Reuse
+      // the read-only list, which also recognizes ungrouped default sessions.
       const listed = await harness.listWorkspaceSessions(await canonicalWorkspacePath(workspace));
       if (!Array.isArray(listed?.sessions)) {
         throw new TypeError('Harness returned an invalid workspace session list');

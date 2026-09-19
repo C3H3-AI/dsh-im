@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, writeFile } fr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { defaultImWorkspace } from '../src/channels/shared/default-workspace.mjs';
 
 import {
   BotWorkspaceStore,
@@ -322,10 +323,10 @@ test('BotWorkspaceStore keeps delivery targets bot-scoped and removes them with 
   assert.equal(saved.deliveryTargets.bot_two['same-target'].route.userId, 'user-two');
 });
 
-test('BotWorkspaceStore uses process.cwd() when a bot has no configured workspace', async (t) => {
+test('BotWorkspaceStore uses the IM directory when a bot has no configured workspace', async (t) => {
   const { root } = await fixture(t);
   const store = await new BotWorkspaceStore(join(root, 'cwd-workspaces.json')).load();
-  assert.equal(await store.ensure('bot_cwd'), process.cwd());
+  assert.equal(await store.ensure('bot_cwd'), defaultImWorkspace());
 });
 
 test('connection test targets survive a new workspace scope for the same bot', async (t) => {
