@@ -163,6 +163,10 @@ Logo 由 dsh-im 的浏览器适配显示，无需修改 DSH。适配保留原始
 
 设置步骤、各渠道字段、完整调用示例、管理端点、错误码与排错说明请查看[《主动投递使用指南》](PROACTIVE_DELIVERY.md)（[English](PROACTIVE_DELIVERY.en.md)）。
 
+### 客户端面板接入
+
+宿主可通过可选客户端服务 `dshImClient` 嵌入完整 IM 管理面板，并按需隐藏或恢复设置入口。dsh web 默认仍使用原来的「设置 → IM机器人」。接口、兼容要求与接入示例见[客户端接入文档](docs/client-integration.md)。
+
 ### 上下文增强
 
 [查看上下文增强说明](docs/上下文增强.md)

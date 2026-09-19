@@ -160,6 +160,10 @@ Saved direct-message targets also offer an opt-in **Two-way Session sync** switc
 
 See the [Proactive Delivery Guide](PROACTIVE_DELIVERY.en.md) ([简体中文](PROACTIVE_DELIVERY.md)) for setup steps, native fields for each supported channel, complete call examples, management endpoints, error codes, and troubleshooting.
 
+### Client panel integration
+
+Shells can embed the complete IM management panel through the optional `dshImClient` service and hide or restore its settings entry. DSH web keeps Settings → IM bots by default. See the [client integration guide](docs/client-integration.md) for the contract, compatibility requirements and lifecycle example.
+
 ### Context enhancement
 
 [Read the context enhancement guide](docs/context-enhancement.md)

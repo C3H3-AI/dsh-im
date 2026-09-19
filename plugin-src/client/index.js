@@ -78,6 +78,7 @@ import { installImStyles } from './styles.js';
 import { installSessionChannelLogos } from './session-channel-logos.js';
 import { UpdatePanel, UPDATE_RPC_CHANNEL } from './update-panel.js';
 import { WorkspaceDirectoryPickerContext } from './workspace-editor.js';
+import { IMPanelErrorBoundary } from './panel-error-boundary.js';
 
 export const name = 'im-settings';
 export const inject = ['slots', 'connection', 'locale', 'workspaces'];
@@ -221,10 +222,15 @@ export function IMSettingsTab({
   deliveryRpcCall,
   globalSettingsRpcCall,
   workspaceDirectoryPicker,
+  preferredSectionId,
   browserLocation = globalThis.location,
   navigateToRecoveryUrl = replacePageLocation,
 }) {
-  const [selected, setSelected] = React.useState('weixin');
+  const [selected, setSelected] = React.useState(() => (
+    preferredSectionId === GLOBAL_SETTINGS_TAB_ID
+      || CHANNELS.some((channel) => channel.id === preferredSectionId)
+      ? preferredSectionId : 'weixin'
+  ));
   const [loopbackRecovery, setLoopbackRecovery] = React.useState(null);
   const [runningVersion, setRunningVersion] = React.useState(IM_PLUGIN_VERSION);
   const [deliverySettings, setDeliverySettings] = React.useState(null);
@@ -498,30 +504,90 @@ export function apply(ctx) {
     pickDirectory: () => callWorkspaceDirectoryApi(ctx, 'pickDirectory'),
   });
 
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: 'xmanrui-dsh-im',
-    order: 21,
-    label: () => t('IM机器人'),
-    locale: IM_LOCALE_NAMESPACE,
-    inject: () => ({
-      dingtalkRpcCall,
-      discordRpcCall,
-      feishuRpcCall,
-      qqRpcCall,
-      slackRpcCall,
-      telegramRpcCall,
-      wecomRpcCall,
-      wecomAppRpcCall,
-      weixinRpcCall,
-      whatsappRpcCall,
-      imessageRpcCall,
-      emailRpcCall,
-      officeRpcCall,
-      updateRpcCall,
-      deliveryRpcCall,
-      globalSettingsRpcCall,
-      workspaceDirectoryPicker,
-    }),
-  }, IMSettingsTab));
+  const panelDependencies = {
+    dingtalkRpcCall,
+    discordRpcCall,
+    feishuRpcCall,
+    qqRpcCall,
+    slackRpcCall,
+    telegramRpcCall,
+    wecomRpcCall,
+    wecomAppRpcCall,
+    weixinRpcCall,
+    whatsappRpcCall,
+    imessageRpcCall,
+    officeRpcCall,
+    emailRpcCall,
+    updateRpcCall,
+    deliveryRpcCall,
+    globalSettingsRpcCall,
+    workspaceDirectoryPicker,
+  };
+  const subscribeLocale = (listener) => typeof ctx.on === 'function'
+    ? ctx.on('locale/change', listener) : () => {};
+  const localeSnapshot = () => ctx.locale.getLocale?.()?.active ?? '';
+
+  // Stable for this plugin lifetime: creating an element must not create a
+  // new component type and reset the reader's selected tab or unsaved input.
+  function IMPanel({ preferredSectionId }) {
+    React.useSyncExternalStore(subscribeLocale, localeSnapshot, localeSnapshot);
+    return h(IMPanelErrorBoundary, null,
+      h(IMSettingsTab, { ...panelDependencies, preferredSectionId }));
+  }
+  const buildPanelElement = (props = {}) => h(IMPanel, {
+    preferredSectionId: props.preferredSectionId,
+  });
+
+  ctx.effect(() => {
+    let disposed = false;
+    let stopSettings = null;
+    let registered = false;
+    const setSettingsVisible = (visible) => {
+      if (disposed) return;
+      if (typeof visible !== 'boolean') throw new TypeError('visible must be a boolean');
+      if (visible === (stopSettings !== null)) return;
+      if (!visible) {
+        const stop = stopSettings;
+        stopSettings = null;
+        stop();
+        return;
+      }
+      // The existing slot controller owns late declarations, withdrawal and
+      // re-declaration. Cancelling it also cancels a pending registration.
+      stopSettings = ctx.slots.inject('settings.section', () => {
+        const unregister = ctx.slots.register({
+          name: 'settings.section',
+          id: 'xmanrui-dsh-im',
+          order: 21,
+          label: () => t('IM机器人'),
+          locale: IM_LOCALE_NAMESPACE,
+          inject: () => panelDependencies,
+        }, buildPanelElement);
+        registered = true;
+        return () => {
+          registered = false;
+          unregister();
+        };
+      });
+    };
+
+    // Publish only after the default registration is established, so a
+    // consumer hiding it during service discovery cannot be overridden.
+    setSettingsVisible(true);
+    if (typeof ctx.provide === 'function') {
+      ctx.provide('dshImClient', Object.freeze({
+        version: 1,
+        render: (props) => disposed ? null : buildPanelElement(props),
+        setSettingsVisible,
+        settingsVisible: () => !disposed && registered,
+      }));
+    }
+    return () => {
+      disposed = true;
+      const stop = stopSettings;
+      stopSettings = null;
+      registered = false;
+      stop?.();
+    };
+  }, 'im-settings: client panel service');
 }

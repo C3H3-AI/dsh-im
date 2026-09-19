@@ -1261,6 +1261,7 @@ test('client registers one top-level bilingual IM settings section with a direct
   const ctx = {
     effect(install, label) {
       effects.push({ install, label });
+      if (label === 'im-settings: client panel service') return install();
     },
     on(event, listener) {
       assert.equal(event, 'locale/change');
@@ -1294,7 +1295,7 @@ test('client registers one top-level bilingual IM settings section with a direct
     slots: {
       inject(name, install) {
         assert.equal(name, 'settings.section');
-        install();
+        return install();
       },
       register(options, component) {
         registrations.push({ options, component });
@@ -1318,7 +1319,7 @@ test('client registers one top-level bilingual IM settings section with a direct
     assert.equal(registrations[0].options.order, 21);
     assert.equal(registrations[0].options.locale, IM_LOCALE_NAMESPACE);
     assert.equal(registrations[0].options.label(), 'IM bots');
-    assert.equal(registrations[0].component, IMSettingsTab);
+    assert.equal(typeof registrations[0].component, 'function');
 
     const injected = registrations[0].options.inject();
     const signal = new AbortController().signal;
@@ -1380,7 +1381,9 @@ test('client directory picker uses the current DSH uiWorkspace service', async (
   const directoryCalls = [];
   let uiWorkspace;
   const ctx = {
-    effect() {},
+    effect(install, label) {
+      if (label === 'im-settings: client panel service') return install();
+    },
     get(name) {
       assert.equal(name, 'uiWorkspace');
       return uiWorkspace;
@@ -1399,7 +1402,7 @@ test('client directory picker uses the current DSH uiWorkspace service', async (
     slots: {
       inject(name, install) {
         assert.equal(name, 'settings.section');
-        install();
+        return install();
       },
       register(options, component) {
         registrations.push({ options, component });
@@ -1555,12 +1558,18 @@ test('every channel tab receives its RPC call from the settings render site', as
   const tabIds = [...source.matchAll(/\{\s*id:\s*'([a-zA-Z]+)',\s*label:/g)].map(m => m[1]);
   assert.ok(tabIds.length >= 12, `expected the channel tab list, found ${tabIds.length}`);
 
-  // Parse the exact `inject: () => ({ ... })` block that feeds IMSettingsTab.
-  const renderSite = source.indexOf('}, IMSettingsTab));');
+  // Parse the dependency block that feeds IMSettingsTab. Upstream (#231)
+  // refactored the render site into a reusable panel, so the props now come
+  // from `panelDependencies` rather than an inline `inject` block; this guard
+  // is about the props reaching the tab, not how they are assembled.
+  const renderSite = source.indexOf('h(IMSettingsTab, {');
   assert.ok(renderSite > 0, 'the IMSettingsTab render site must exist');
-  const injectStart = source.lastIndexOf('inject: () => ({', renderSite);
-  assert.ok(injectStart > 0, 'the settings tab inject block must exist');
-  const injectBlock = source.slice(injectStart, source.indexOf('})', injectStart));
+  const blockStart = source.lastIndexOf('const panelDependencies = {', renderSite);
+  const injectStart = blockStart >= 0
+    ? blockStart
+    : source.lastIndexOf('inject: () => ({', renderSite);
+  assert.ok(injectStart > 0, 'the settings tab dependency block must exist');
+  const injectBlock = source.slice(injectStart, source.indexOf('};', injectStart));
   const providedProps = new Set(
     [...injectBlock.matchAll(/([a-zA-Z]+RpcCall)\s*,/g)].map(m => m[1]),
   );

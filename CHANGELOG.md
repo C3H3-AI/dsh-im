@@ -6,6 +6,30 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.22.0] - 2026-09-19
+
+### Added / 新增
+
+- 新增可选客户端服务 `dshImClient` v1，宿主可通过 `render({ preferredSectionId })` 嵌入完整 IM 管理面板，并用 `setSettingsVisible(boolean)` 隐藏或恢复本客户端的设置入口；`settingsVisible()` 返回入口是否已注册（[#231](https://github.com/xmanrui/dsh-im/issues/231)）。默认仍保留「设置 → IM机器人」，不需要迁移数据或新增配置，Host 侧主动投递服务 `dshIm` 不变。
+  Added the optional `dshImClient` v1 client service so shells can embed the complete IM management panel with `render({ preferredSectionId })`, hide or restore this client's settings entry with `setSettingsVisible(boolean)`, and check its registration with `settingsVisible()` ([#231](https://github.com/xmanrui/dsh-im/issues/231)). Settings → IM bots remains the default without migration or new configuration; the Host-side `dshIm` delivery service is unchanged.
+- 嵌入面板复用现有 RPC、权限、目录选择和语言服务，保持组件身份稳定，避免重复渲染重置未保存表单；支持首次栏目选择、语言刷新及局部错误重试。入口开关只作用于当前客户端内存，不影响其他浏览器或机器人运行；不支持新服务的旧宿主继续使用原设置页。接口 v1 面向单个活跃管理面板，不提供多面板状态同步。
+  Embedded panels reuse existing RPC, permissions, directory selection, and locale services, with stable component identity to preserve unsaved forms across re-renders. Initial-section selection, locale updates, and local error recovery are supported. Visibility is in-memory and client-local, without affecting other browsers or running bots; older Hosts retain the original settings page. V1 targets one active management panel and does not synchronize multiple panels.
+
+### Changed / 变更
+
+- 新机器人默认工作目录由 Host 当前目录改为 `$DSH_HOME/im`，未设置时使用 `~/.dsh/im`，默认目录自动创建；显式 `workspace` 优先，`dshHome` 可覆盖环境变量。默认目录中的新 Session 保持「未分组」，切换到其他目录时继续使用原工作区分组机制，切回默认目录后新 Session 恢复未分组。已有机器人的目录和历史 Session 不自动迁移；各机器人仍独立保存聊天与 Session 的绑定。
+  New bots default to `$DSH_HOME/im` instead of the Host's current directory, falling back to `~/.dsh/im`; the default directory is created automatically. Explicit `workspace` takes precedence, and `dshHome` overrides the environment variable. New Sessions in the default directory remain ungrouped, while other directories retain workspace grouping. Existing bot directories and historical Sessions are not migrated, and each bot retains independent chat-to-Session bindings.
+
+### Fixed / 修复
+
+- 默认 IM 目录的 `/sessionlist`／`/sessions` 识别工作目录匹配的未分组 Session，排除已归属其他工作区分组的会话；普通未分组 Session 可按 ID 或当前列表序号绑定，重启后也能重新识别已有绑定。路径比较兼容符号链接，默认目录创建失败时直接报告错误，不退回 Host 当前目录。
+  `/sessionlist` and `/sessions` include ungrouped Sessions whose working directory matches the default IM directory, without including Sessions assigned to other workspace groups. Ordinary ungrouped Sessions can be bound by ID or current-list index, and existing bindings remain recognizable after restart. Path matching supports symbolic links; default-directory creation errors are reported instead of falling back to the Host's current directory.
+
+### Documentation / 文档
+
+- 新增中英文客户端接入文档并随 npm 包发布，记录服务契约、生命周期、权限及兼容边界；同步默认目录与会话命令说明。仓库提供独立的 `integrations/desktop-panel` 可选桌面接入示例，它不随 dsh-im npm 包发布，也不代表桌面端已内置入口。
+  Added a bilingual client integration guide to the npm package covering the service contract, lifecycle, permissions, and compatibility, and updated default-directory and Session-command guidance. The repository includes an optional standalone `integrations/desktop-panel` integration; it is excluded from the dsh-im npm package and does not imply a built-in desktop entry.
+
 ## [4.21.2] - 2026-09-17
 
 ### Fixed / 修复
@@ -1097,7 +1121,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.21.2...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.22.0...HEAD
+[4.22.0]: https://github.com/xmanrui/dsh-im/compare/v4.21.2...v4.22.0
 [4.21.2]: https://github.com/xmanrui/dsh-im/compare/v4.21.1...v4.21.2
 [4.21.1]: https://github.com/xmanrui/dsh-im/compare/v4.21.0...v4.21.1
 [4.21.0]: https://github.com/xmanrui/dsh-im/compare/v4.20.2...v4.21.0

@@ -39,6 +39,7 @@ const EN = Object.freeze({
   'macOS Messages 权限': 'macOS Messages permissions',
   'IM机器人': 'IM bots',
   'IM机器人设置': 'IM bot settings',
+  'IM 面板加载失败': 'Could not load the IM panel',
   '更多机器人设置': 'More bot settings',
   '机器人设置': 'Bot settings',
   '机器人设置页签': 'Bot settings tabs',
