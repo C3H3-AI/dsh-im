@@ -166,6 +166,7 @@ export const EMAIL_CLIENT_DEFAULTS = Object.freeze({
   pollIntervalMs: 20_000,
 });
 
+
 export class EmailConfigStore extends TokenBotConfigStore {
   constructor(path) {
     super(path, {

@@ -11,6 +11,31 @@ import { EMAIL_CLIENT_DEFAULTS } from './config-store.mjs';
 
 const DEFAULT_POLL_INTERVAL_MS = EMAIL_CLIENT_DEFAULTS.pollIntervalMs;
 
+// The Agent mailbox API allows 10 requests a minute and 200 an hour, and a
+// fixed retry interval burns that budget while the limit is already exceeded —
+// so the mailbox never recovers. A rate-limited poll therefore backs off, and
+// the delay doubles on each consecutive failure up to this ceiling.
+const RATE_LIMIT_BACKOFF_MS = 60_000;
+
+/**
+ * The polling interval to use for a declared request budget.
+ *
+ * The provider publishes its limits at runtime (see `+me`), so the interval is
+ * derived from them rather than hard-coded: a poll costs one request for the
+ * list plus one per message read, and the provider's own numbers are the only
+ * authoritative source. Half the per-minute budget is left for reads, replies
+ * and anything else sharing the token, and the floor keeps a small budget from
+ * producing an absurdly long interval.
+ */
+export function pollIntervalForLimits(limits, { perPollRequests = 2, floorMs = 20_000 } = {}) {
+  const perMinute = Number(limits?.perMinute);
+  if (!Number.isFinite(perMinute) || perMinute <= 0) return null;
+  const usable = Math.max(1, Math.floor(perMinute / 2));
+  const interval = Math.round((60_000 * perPollRequests) / usable);
+  return Math.max(floorMs, interval);
+}
+const MAX_POLL_BACKOFF_MS = 15 * 60_000;
+
 /**
  * How far behind the mailbox tip the first poll starts. Leaving a small window
  * means mail that lands while the channel is starting is not skipped, while the
@@ -285,6 +310,9 @@ export class EmailRuntime {
   #logger;
   #replyTimeoutMs;
   #pollIntervalMs;
+  // Current delay between polls; grows on failure and resets on success.
+  #pollDelayMs;
+  #consecutivePollFailures = 0;
   #createApi;
   #credential = null;
   #onTokensRefreshed;
@@ -322,6 +350,7 @@ export class EmailRuntime {
     this.#logger = logger;
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#pollIntervalMs = pollIntervalMs;
+    this.#pollDelayMs = pollIntervalMs;
     // A caller-supplied transport wins; it is what knows the mailbox's protocol.
     this.#createApi = typeof createTransport === 'function' ? createTransport : createApi;
     this.#credential = credential ?? null;
@@ -465,7 +494,7 @@ export class EmailRuntime {
   #schedulePoll(delay) {
     if (this.#stopped) return;
     this.#timer = setTimeout(() => {
-      this.#polling = this.#poll().finally(() => this.#schedulePoll(this.#pollIntervalMs));
+      this.#polling = this.#poll().finally(() => this.#schedulePoll(this.#pollDelayMs));
     }, delay);
     this.#timer.unref?.();
   }
@@ -550,6 +579,8 @@ export class EmailRuntime {
       this.#status.lastError = null;
       // A poll that works is the proof the mailbox is reachable.
       this.#status.connectionState = 'connected';
+      this.#consecutivePollFailures = 0;
+      this.#pollDelayMs = this.#pollIntervalMs;
     } catch (error) {
       if (!this.#stopped) {
         this.#status.lastError = error.message;
@@ -557,8 +588,35 @@ export class EmailRuntime {
         // transport opened; leaving this as "connected" reported a healthy
         // channel while no mail could be read at all.
         this.#status.connectionState = 'failed';
-        this.#logger.warn?.('[dsh-im:email] polling failed', error);
+        this.#consecutivePollFailures += 1;
+
+        // Retrying a rate-limited endpoint on a fixed interval keeps the limit
+        // exceeded, so the mailbox never comes back. Back off instead — and
+        // wait longer each time, because the hourly window refills slowly.
+        const limited = isRateLimitError(error);
+        const base = limited ? RATE_LIMIT_BACKOFF_MS : this.#pollIntervalMs;
+        this.#pollDelayMs = Math.min(
+          base * (2 ** Math.min(this.#consecutivePollFailures - 1, 5)),
+          MAX_POLL_BACKOFF_MS,
+        );
+        this.#status.retryAt = Date.now() + this.#pollDelayMs;
+        if (limited) this.#status.rateLimited = true;
+
+        this.#logger.warn?.(
+          `[dsh-im:email] polling failed${limited ? ' (rate limited)' : ''}; `
+          + `retrying in ${Math.round(this.#pollDelayMs / 1000)}s`,
+          error,
+        );
       }
     }
   }
+}
+
+/** Whether an error is the provider refusing us for exceeding a rate limit. */
+export function isRateLimitError(error) {
+  if (error?.status === 429 || error?.httpStatus === 429) return true;
+  const code = String(error?.code ?? '');
+  if (code === 'rate-limited' || code === 'RATE_LIMIT_EXCEEDED' || code === '429') return true;
+  const text = String(error?.message ?? '');
+  return /rate limit|too many requests|429/i.test(text);
 }

@@ -1653,3 +1653,65 @@ test('a mail thread survives a restart', async () => {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+test('a rate-limited poll backs off instead of hammering the API', async () => {
+  // The Agent mailbox allows 10 requests a minute. Retrying on the fixed
+  // interval kept the limit exceeded, so the mailbox never recovered.
+  const { EmailRuntime, isRateLimitError } = await import('../../../src/channels/email/email-runtime.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-email-429-'));
+  try {
+    assert.equal(isRateLimitError({ status: 429 }), true);
+    assert.equal(isRateLimitError({ message: 'Request rate limit exceeded, please retry later' }), true);
+    assert.equal(isRateLimitError({ code: 'RATE_LIMIT_EXCEEDED' }), true);
+    assert.equal(isRateLimitError({ message: 'connection refused' }), false);
+
+    const state = await new EmailStateStore(join(dir, 'state.json')).load();
+    let calls = 0;
+    const runtime = new EmailRuntime({
+      config: { platformId: 'b@y.com', transport: 'agent-mail', allowedSenders: ['a@x.com'] },
+      harness: { ensureRunning: async () => {} },
+      state,
+      logger: { warn() {}, info() {}, error() {}, log() {} },
+      createApi: () => ({
+        connect: async () => {}, disconnect: async () => {}, latestUid: async () => 0,
+        listMessages: async () => {
+          calls += 1;
+          const error = new Error('Request rate limit exceeded, please retry later');
+          error.status = 429;
+          throw error;
+        },
+        sendReply: async () => {}, sendText: async () => {},
+      }),
+    });
+    await runtime.start();
+    await new Promise((resolve) => { setTimeout(resolve, 900); });
+    assert.ok(calls <= 2, `retried ${calls} times instead of backing off`);
+    assert.equal(runtime.status.connectionState, 'failed');
+    assert.ok(runtime.status.retryAt > Date.now(), 'a retry time is reported');
+    await runtime.stop();
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('the polling interval follows the provider-declared limits', async () => {
+  // The provider publishes its limits at runtime rather than in its docs, so
+  // the interval is derived from them instead of being hard-coded.
+  const { pollIntervalForLimits } = await import('../../../src/channels/email/email-runtime.mjs');
+  const { normalizeRateLimits } = await import('../../../src/channels/email/transports/agent-mail.mjs');
+
+  assert.deepEqual(normalizeRateLimits({
+    requests_per_minute: 10, requests_per_hour: 200, daily_send_quota: 50,
+  }), { perMinute: 10, perHour: 200, dailySendQuota: 50 });
+  // Some revisions nest the limits by capability.
+  assert.deepEqual(normalizeRateLimits({ mail: { requests_per_minute: 10 } }), { perMinute: 10 });
+  assert.equal(normalizeRateLimits({}), null, 'an empty payload means "unknown", not "unlimited"');
+  assert.equal(normalizeRateLimits(null), null);
+
+  // A tighter budget must produce a longer interval, never a shorter one.
+  const tight = pollIntervalForLimits({ perMinute: 10 });
+  const loose = pollIntervalForLimits({ perMinute: 60 });
+  assert.ok(tight > loose, `expected ${tight} > ${loose}`);
+  assert.ok(tight >= 20_000, 'the floor keeps a small budget sane');
+  assert.equal(pollIntervalForLimits(null), null, 'unknown limits fall back to the default');
+});

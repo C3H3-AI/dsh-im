@@ -87,7 +87,42 @@ export async function fetchAgentMailIdentity({ signal, workspace } = {}) {
     address,
     aliasId: String(primary?.alias_id ?? '').trim(),
     name: String(primary?.name ?? '').trim(),
+    // The provider publishes its own limits here rather than in its docs, so
+    // they are read at runtime instead of being hard-coded.
+    rateLimits: normalizeRateLimits(document?.data?.rate_limits),
   };
+}
+
+/**
+ * The provider's declared limits, normalized to a stable shape.
+ *
+ * Returns null when the account reports none, so callers can fall back rather
+ * than treating an absent field as "unlimited".
+ */
+export function normalizeRateLimits(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  // The payload nests limits by capability in some revisions and is flat in
+  // others, so the object is flattened one level before reading.
+  const flat = { ...raw };
+  for (const value of Object.values(raw)) {
+    if (value && typeof value === 'object') Object.assign(flat, value);
+  }
+  const positive = (...keys) => {
+    for (const key of keys) {
+      const value = Number(flat[key]);
+      if (Number.isFinite(value) && value > 0) return value;
+    }
+    return null;
+  };
+  const limits = {
+    perMinute: positive('requests_per_minute', 'per_minute', 'rpm'),
+    perHour: positive('requests_per_hour', 'per_hour', 'rph'),
+    dailySendQuota: positive('daily_send_quota', 'per_day'),
+  };
+  const normalized = Object.fromEntries(
+    Object.entries(limits).filter(([, value]) => value !== null),
+  );
+  return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
 /** One message summary or full message, in this channel's shape. */
