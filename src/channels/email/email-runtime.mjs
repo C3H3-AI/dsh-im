@@ -563,7 +563,13 @@ export class EmailRuntime {
       const remaining = Math.max(1, deadline - Date.now());
       const settled = await Promise.race([
         Promise.allSettled([...this.#deliveries]).then(() => true),
-        new Promise((resolve) => { setTimeout(() => resolve(false), remaining).unref?.(); }),
+        // Deliberately NOT unref'd. An unref'd timer does not hold the event
+        // loop open, so when it is the only pending handle the process can
+        // finish before it fires — leaving this race unresolved forever and
+        // hanging whoever awaited it. That is exactly what wedged CI: the
+        // parked-delivery test replaced `accept` with a never-settling promise,
+        // `stop()` awaited this race, and the timer never got to run.
+        new Promise((resolve) => { setTimeout(() => resolve(false), remaining); }),
       ]);
       if (!settled) break;
     }
